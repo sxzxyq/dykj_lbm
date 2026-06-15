@@ -1,0 +1,327 @@
+"""Isaac Lab config for a Franka cube pick-and-place task with a red target area."""
+
+import math
+import os
+
+import isaaclab.sim as sim_utils
+from isaaclab.assets import AssetBaseCfg, RigidObjectCfg
+from isaaclab.envs import mdp as base_mdp
+from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import TerminationTermCfg as DoneTerm
+from isaaclab.sensors import CameraCfg
+from isaaclab.sim.schemas.schemas_cfg import CollisionPropertiesCfg, RigidBodyPropertiesCfg
+from isaaclab.utils import configclass
+
+from isaaclab_tasks.manager_based.manipulation.lift import mdp as lift_mdp
+from isaaclab_tasks.manager_based.manipulation.lift.config.franka.ik_rel_env_cfg import (
+    FrankaCubeLiftEnvCfg,
+)
+from isaaclab_tasks.manager_based.manipulation.lift.lift_env_cfg import ObservationsCfg as LiftObservationsCfg
+from isaaclab_assets.robots.franka import FRANKA_PANDA_HIGH_PD_CFG
+
+from . import mdp as pick_place_mdp
+
+
+def _parse_float_pair_env(name: str, default: tuple[float, float]) -> tuple[float, float]:
+    value = os.environ.get(name)
+    if not value:
+        return default
+    parts = [part.strip() for part in value.split(",")]
+    if len(parts) != 2:
+        raise ValueError(f"{name} must be formatted as 'min,max', got {value!r}")
+    return float(parts[0]), float(parts[1])
+
+
+def _cube_radius_range_from_env() -> tuple[float, float]:
+    return _parse_float_pair_env("CUBE_RADIUS_RANGE", (0.12, 0.22))
+
+
+def _cube_angle_range_from_env() -> tuple[float, float]:
+    radians = os.environ.get("CUBE_ANGLE_RANGE_RAD")
+    if radians:
+        return _parse_float_pair_env("CUBE_ANGLE_RANGE_RAD", (-2.61799387799, -0.52359877559))
+    degrees = _parse_float_pair_env("CUBE_ANGLE_RANGE_DEG", (-150.0, -30.0))
+    return math.radians(degrees[0]), math.radians(degrees[1])
+
+
+def _target_xy_from_env() -> tuple[float, float]:
+    return _parse_float_pair_env("TARGET_XY", (0.50, 0.00))
+
+
+def _cube_reset_target_xy_from_env(default: tuple[float, float]) -> tuple[float, float]:
+    return _parse_float_pair_env("CUBE_RESET_TARGET_XY", default)
+
+
+@configclass
+class PickPlaceObservationsCfg(LiftObservationsCfg):
+    """Policy observations for the red-target pick-and-place task.
+
+    The low-dimensional Lift terms are kept, but the group is not concatenated so image and state
+    observations stay as named fields. This is closer to the HF/LeRobot dataset structure we need.
+    """
+
+    @configclass
+    class PolicyCfg(LiftObservationsCfg.PolicyCfg):
+        target_object_position = None
+        target_area_position = ObsTerm(
+            func=pick_place_mdp.target_area_position_in_robot_root_frame,
+            params={"target_xy": (0.50, 0.00), "target_cube_center_z": 0.0205},
+        )
+        ee_position = ObsTerm(func=pick_place_mdp.ee_position_in_robot_root_frame)
+        ee_quat = ObsTerm(func=pick_place_mdp.ee_quat_in_robot_root_frame)
+        wrist_rgb = ObsTerm(
+            func=base_mdp.image,
+            params={"sensor_cfg": SceneEntityCfg("wrist_cam"), "data_type": "rgb", "normalize": False},
+        )
+        observer_wrist_rgb = ObsTerm(
+            func=base_mdp.image,
+            params={"sensor_cfg": SceneEntityCfg("observer_wrist_cam"), "data_type": "rgb", "normalize": False},
+        )
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = False
+
+    policy: PolicyCfg = PolicyCfg()
+
+
+@configclass
+class CubePickPlaceRedTargetFrankaIKRelVisuomotorEnvCfg(FrankaCubeLiftEnvCfg):
+    """Lift-derived Franka env with a red placement target and wrist camera.
+
+    The environment keeps Lift's Franka IK setup, but uses a fixed red tabletop placement target for
+    observations, rewards, and task success.
+    """
+
+    observations: PickPlaceObservationsCfg = PickPlaceObservationsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.task_name = "cube_pick_place_red_target"
+        self.instruction = "Pick up the cube and place it on the red target area."
+
+        # The red target is fixed in the scene, so Lift's random object_pose command is no longer needed.
+        self.commands.object_pose = None
+        self.observations.policy.target_object_position = None
+        self.target_area_center_xy = _target_xy_from_env()
+        self.cube_reset_target_xy = _cube_reset_target_xy_from_env(self.target_area_center_xy)
+        self.target_area_size_xy = (0.12, 0.12)
+        self.observations.policy.target_area_position.params["target_xy"] = self.target_area_center_xy
+        # Sample the cube in front of the red target for dataset collection. The radius range is wide
+        # enough to force visual localization while staying inside the scripted expert's reliable reach.
+        self.events.reset_object_position = EventTerm(
+            func=pick_place_mdp.reset_object_pose_around_target,
+            mode="reset",
+            params={
+                "target_xy": self.cube_reset_target_xy,
+                "radius_range": _cube_radius_range_from_env(),
+                "angle_range": _cube_angle_range_from_env(),
+                "object_center_z": 0.0205,
+                "yaw_range": (0.0, 0.0),
+                "robot_cfg": SceneEntityCfg("robot"),
+                "object_cfg": SceneEntityCfg("object"),
+            },
+        )
+        # Keep passive arms from twitching at startup by matching PD targets to reset joint states.
+        self.events.reset_all.params = {"reset_joint_targets": True}
+
+        # Use a single environment by default for smoke tests and GUI inspection.
+        self.scene.num_envs = 1
+        self.scene.env_spacing = 2.5
+
+        # Longer episode than the Lift default so a future scripted pick-place has room to finish.
+        self.episode_length_s = 30.0
+        # Keep long-running GUI inspections from periodically resetting the whole scene and twitching the observer arm.
+        self.terminations.time_out = None
+
+        # Make the table semantically easy to inspect in the viewport/replicator tools.
+        self.scene.table.spawn.semantic_tags = [("class", "table")]
+        self.scene.table.spawn.scale = (1.35, 1.80, 1.0)
+
+        # Explicit actor-arm pose so the dual-arm layout can be tuned in one place.
+        self.scene.robot.init_state.pos = (0.0, 0.30, 0.0)
+        self.scene.robot.init_state.rot = (1.0, 0.0, 0.0, 0.0)
+        # Higher ready pose than the Franka asset default, giving the actor wrist camera a wider reset view.
+        self.scene.robot.init_state.joint_pos = {
+            "panda_joint1": 0.0,
+            "panda_joint2": -0.73,
+            "panda_joint3": 0.0,
+            "panda_joint4": -2.83,
+            "panda_joint5": 0.0,
+            "panda_joint6": 3.12,
+            "panda_joint7": 0.8,
+            "panda_finger_joint.*": 0.04,
+        }
+
+        # A second Franka is kept static for now. Its wrist camera provides a global/observer view and
+        # leaves the scene layout ready for future bimanual control without changing dataset semantics.
+        self.scene.observer_robot = FRANKA_PANDA_HIGH_PD_CFG.replace(prim_path="{ENV_REGEX_NS}/ObserverRobot")
+        self.scene.observer_robot.init_state.pos = (0.0, -0.50, 0.0)
+        self.scene.observer_robot.init_state.rot = (1.0, 0.0, 0.0, 0.0)
+        self.scene.observer_robot.init_state.joint_pos = {
+            "panda_joint1": 0.0,
+            "panda_joint2": -0.569,
+            "panda_joint3": 0.0,
+            "panda_joint4": -2.810,
+            "panda_joint5": 0.0,
+            "panda_joint6": 3.037,
+            "panda_joint7": 0.741,
+            "panda_finger_joint.*": 0.04,
+        }
+        self.scene.observer_robot.spawn.semantic_tags = [("class", "observer_robot")]
+
+        # Replace the textured DexCube with a plain blue cube for cleaner vision training data.
+        self.scene.object = RigidObjectCfg(
+            prim_path="{ENV_REGEX_NS}/Object",
+            init_state=RigidObjectCfg.InitialStateCfg(pos=(0.50, 0.00, 0.0205), rot=(1.0, 0.0, 0.0, 0.0)),
+            spawn=sim_utils.CuboidCfg(
+                size=(0.04, 0.04, 0.04),
+                rigid_props=RigidBodyPropertiesCfg(
+                    solver_position_iteration_count=16,
+                    solver_velocity_iteration_count=1,
+                    max_angular_velocity=1000.0,
+                    max_linear_velocity=1000.0,
+                    max_depenetration_velocity=5.0,
+                    disable_gravity=False,
+                ),
+                mass_props=sim_utils.MassPropertiesCfg(mass=0.05),
+                collision_props=CollisionPropertiesCfg(),
+                visual_material=sim_utils.PreviewSurfaceCfg(
+                    diffuse_color=(0.0, 0.15, 1.0),
+                    roughness=0.45,
+                    metallic=0.0,
+                ),
+                semantic_tags=[("class", "cube")],
+            ),
+        )
+
+        # A thin visual red patch on the tabletop. Collision is disabled so it does not perturb the cube.
+        self.scene.target_area = AssetBaseCfg(
+            prim_path="{ENV_REGEX_NS}/TargetArea",
+            init_state=AssetBaseCfg.InitialStateCfg(
+                pos=(self.target_area_center_xy[0], 0.30 + self.target_area_center_xy[1], 0.0015)
+            ),
+            spawn=sim_utils.CuboidCfg(
+                size=(0.12, 0.12, 0.001),
+                visual_material=sim_utils.PreviewSurfaceCfg(
+                    diffuse_color=(1.0, 0.0, 0.0),
+                    roughness=0.5,
+                    metallic=0.0,
+                ),
+                collision_props=CollisionPropertiesCfg(collision_enabled=False),
+                semantic_tags=[("class", "target_area")],
+            ),
+        )
+
+        # Eye-in-hand camera mounted on panda_hand. The pose aims from the hand side toward the TCP
+        # so the cube/target stay visible instead of relying on the stack task's side-looking wrist view.
+        self.scene.wrist_cam = CameraCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/panda_hand/wrist_cam",
+            update_period=0.0,
+            height=256,
+            width=256,
+            data_types=["rgb"],
+            spawn=sim_utils.PinholeCameraCfg(
+                focal_length=18.0,
+                focus_distance=400.0,
+                horizontal_aperture=20.955,
+                clipping_range=(0.03, 2.0),
+            ),
+            offset=CameraCfg.OffsetCfg(
+                # viewpoint
+                # pos=(0.08, 0.0, 0.025),
+                # rot=(0.66014, -0.25340, -0.25340, 0.66014),
+                # train
+                pos=(0.08, 0.0, 0.0375),
+                rot=(0.66014, -0.25340, -0.25340, 0.66014),
+                convention="ros",
+            ),
+        )
+
+        # The observer wrist camera is mounted on the static second arm and acts as the global view.
+        self.scene.observer_wrist_cam = CameraCfg(
+            prim_path="{ENV_REGEX_NS}/ObserverRobot/panda_hand/observer_wrist_cam",
+            update_period=0.0,
+            height=256,
+            width=256,
+            data_types=["rgb"],
+            spawn=sim_utils.PinholeCameraCfg(
+                focal_length=16.0,
+                focus_distance=400.0,
+                horizontal_aperture=20.955,
+                clipping_range=(0.03, 3.0),
+            ),
+            offset=CameraCfg.OffsetCfg(
+                # viewpoint
+                # pos=(0.9, 0.3, -0.6),
+                # rot=(0.82105, 0.37730, -0.400974, 0.15081),
+                # train
+                pos=(0.9, -0.2, -0.6),
+                rot=(0.85570, 0.28544, -0.41505, 0.11824),
+                convention="ros",
+            ),
+        )
+
+        self.image_obs_list = ["wrist_cam", "observer_wrist_cam"]
+        # Target coordinates are expressed in the actor robot root frame. The red patch is at world
+        # (0.50, 0.30), while the actor robot root is at world y=0.30, so the local y target is 0.00.
+
+        placement_params = {
+            "target_xy": self.target_area_center_xy,
+            "target_size_xy": self.target_area_size_xy,
+            "target_cube_center_z": 0.0205,
+            "height_tolerance": 0.03,
+            "require_release": True,
+            "gripper_open_command": 0.04,
+            "gripper_open_threshold": 0.01,
+            "robot_cfg": SceneEntityCfg("robot"),
+            "gripper_cfg": SceneEntityCfg("robot", joint_names=["panda_finger.*"]),
+            "object_cfg": SceneEntityCfg("object"),
+        }
+
+        self.rewards.reaching_object = RewTerm(func=lift_mdp.object_ee_distance, params={"std": 0.1}, weight=1.0)
+        self.rewards.lifting_object = RewTerm(func=lift_mdp.object_is_lifted, params={"minimal_height": 0.04}, weight=8.0)
+        self.rewards.object_goal_tracking = RewTerm(
+            func=pick_place_mdp.object_target_xy_tracking,
+            params={
+                "std": 0.20,
+                "lifted_height": 0.04,
+                "target_xy": self.target_area_center_xy,
+                "target_cube_center_z": 0.0205,
+            },
+            weight=10.0,
+        )
+        self.rewards.object_goal_tracking_fine_grained = RewTerm(
+            func=pick_place_mdp.object_target_xy_tracking,
+            params={
+                "std": 0.04,
+                "lifted_height": 0.04,
+                "target_xy": self.target_area_center_xy,
+                "target_cube_center_z": 0.0205,
+            },
+            weight=6.0,
+        )
+        self.rewards.placed_on_target = RewTerm(
+            func=pick_place_mdp.object_on_target_area_reward,
+            params=placement_params,
+            weight=25.0,
+        )
+        self.rewards.action_rate = RewTerm(func=base_mdp.action_rate_l2, weight=-1e-4)
+        self.rewards.joint_vel = RewTerm(
+            func=base_mdp.joint_vel_l2,
+            weight=-1e-4,
+            params={"asset_cfg": SceneEntityCfg("robot")},
+        )
+
+        self.terminations.object_dropping = DoneTerm(
+            func=base_mdp.root_height_below_minimum,
+            params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("object")},
+        )
+        self.terminations.success = DoneTerm(
+            func=pick_place_mdp.object_stably_placed_on_target,
+            params={**placement_params, "stable_steps": 10},
+        )

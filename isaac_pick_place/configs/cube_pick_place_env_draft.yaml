@@ -1,0 +1,205 @@
+# Draft environment design for the Isaac Lab red-target cube pick-and-place task.
+
+task:
+  id: Isaac-Cube-Pick-Place-Red-Target-Franka-IK-Rel-Visuomotor-v0
+  name: cube_pick_place_red_target
+  instruction: "Pick up the cube and place it on the red target area."
+  scope: sim_only
+
+implementation_status:
+  python_env_config: "/home/ubuntu/Workspace/seven_dof_pick_place_lbm/isaac_pick_place/tasks/cube_pick_place/env_cfg.py"
+  gym_registration: "/home/ubuntu/Workspace/seven_dof_pick_place_lbm/isaac_pick_place/tasks/cube_pick_place/__init__.py"
+  smoke_script: "/home/ubuntu/Workspace/seven_dof_pick_place_lbm/isaac_pick_place/scripts/smoke_lift_env.py"
+  done:
+    - "Gym task id registered."
+    - "Lift-derived Franka relative IK environment can be created/reset/stepped."
+    - "Red target_area scene entity is present."
+    - "Wrist wrist_cam scene sensor is present."
+    - "Textured DexCube replaced with a plain blue CuboidCfg cube."
+    - "Red target_area lowered from a floating patch to a thin tabletop patch."
+    - "Lift command pose debug axes disabled for clean visual observations."
+    - "wrist_rgb added to the non-concatenated policy observation config."
+    - "Runtime smoke verified obs.policy.wrist_rgb shape is (1, 200, 200, 3)."
+    - "Lift object_pose command removed; fixed target_area_position is now used in policy observations."
+    - "Lift reward/termination replaced with red-target pick-place reward terms and stable success termination."
+    - "Runtime smoke verified reward manager includes placed_on_target and termination manager includes success."
+    - "Waypoint-based scripted_pick_place.py expert reached success in 1/1 headless rollout."
+    - "Static observer_robot Franka added with observer_wrist_cam and obs.policy.observer_wrist_rgb configured."
+    - "Runtime smoke verified obs.policy.observer_wrist_rgb shape is (1, 200, 200, 3)."
+    - "Table xy scale expanded and observer_robot moved beside actor on the same long edge."
+    - "Time-out termination disabled to avoid periodic scene resets during long GUI inspection."
+    - "Cube reset randomization temporarily disabled for camera/layout debugging."
+  pending:
+    - "Restore or redesign cube pose randomization before demo collection/training."
+    - "GUI view coverage check for observer_wrist_cam."
+    - "Add dataset collection/export around the scripted expert."
+    - "Log richer rollout metrics for scripted and policy evaluation."
+
+derivation:
+  primary_base: Isaac-Lift-Cube-Franka-IK-Rel-v0
+  reason:
+    - "Already validates Franka Panda, Panda gripper, single cube, table, and relative differential IK."
+    - "Keeps the first custom task smaller than the multi-cube stack environment."
+  borrow_from_stack_visuomotor:
+    - "wrist CameraCfg attached to panda_hand"
+    - "non-concatenated policy observation group for image + state"
+    - "state observation terms such as eef pose, gripper position, and last action"
+  avoid_initially:
+    - "free-floating table camera; use the static observer arm wrist camera instead"
+    - "three-cube stack logic"
+    - "visual domain randomization"
+    - "multi-subtask observation groups"
+
+scene:
+  table:
+    base_asset: SeattleLabTable
+    visual: white tabletop
+    scale_xyz: [1.35, 1.80, 1.0]
+  target_area:
+    type: thin_red_square_patch
+    center_xyz: [0.50, 0.22, 0.0015]
+    size_xyz_m: [0.12, 0.12, 0.001]
+    collision: false
+    purpose: "visible placement target and success region"
+  cube:
+    base_asset: sim_utils.CuboidCfg
+    color: plain_blue
+    size_m: 0.04
+    mass_kg: 0.05
+    initial_xy_range:
+      x: [0.50, 0.50]
+      y: [0.00, 0.00]
+    randomization_status: "temporarily disabled in env_cfg.py via self.events.reset_object_position = None"
+    exclude_target_area: true
+  lighting:
+    initial: fixed_dome_light
+    randomization: later
+
+robot:
+  actor:
+    scene_name: robot
+    prim_path: "{ENV_REGEX_NS}/Robot"
+    asset_cfg: FRANKA_PANDA_HIGH_PD_CFG
+    usd: "{ISAACLAB_NUCLEUS_DIR}/Robots/FrankaEmika/panda_instanceable.usd"
+    init_pos: [0.0, 0.0, 0.0]
+    init_rot_wxyz: [1.0, 0.0, 0.0, 0.0]
+    end_effector_body: panda_hand
+    gripper_joints: ["panda_finger.*"]
+    open_command: 0.04
+    close_command: 0.0
+  observer:
+    scene_name: observer_robot
+    prim_path: "{ENV_REGEX_NS}/ObserverRobot"
+    asset_cfg: FRANKA_PANDA_HIGH_PD_CFG
+    role: "static second arm for global/observer wrist camera; not controlled in the first pass"
+    init_pos: [0.0, -0.38, 0.0]
+    init_rot_wxyz: [1.0, 0.0, 0.0, 0.0]
+    action_space: none
+
+control:
+  type: DifferentialInverseKinematicsActionCfg
+  command_type: pose
+  use_relative_mode: true
+  ik_method: dls
+  body_name: panda_hand
+  action_dim: 7
+  action_terms:
+    arm_action: 6
+    gripper_action: 1
+  nominal_policy_hz: 10
+  isaaclab_decimation_candidate: 5
+  action_limits_first_pass:
+    translation_m_per_step: 0.02
+    rotation_rad_per_step: 0.10
+
+camera:
+  actor_wrist:
+    source_reference: "Adjusted from Isaac-Stack-Cube-Franka-IK-Rel-Visuomotor-v0 after GUI wrist-view check."
+    prim_path: "{ENV_REGEX_NS}/Robot/panda_hand/wrist_cam"
+    mount_parent: panda_hand
+    height: 200
+    width: 200
+    data_types: ["rgb"]
+    focal_length: 18.0
+    clipping_range: [0.03, 2.0]
+    offset_pos: [0.13, 0.0, -0.15]
+    offset_rot_ros: [0.68734, -0.16602, -0.16602, 0.68734]
+    forward_axis_in_hand_frame: [-0.456, 0.0, 0.890]
+    intent: "Eye-in-hand side view aimed toward the TCP/gripper center so cube and red target remain visible."
+  observer_wrist:
+    prim_path: "{ENV_REGEX_NS}/ObserverRobot/panda_hand/observer_wrist_cam"
+    mount_parent: "observer_robot/panda_hand"
+    height: 200
+    width: 200
+    data_types: ["rgb"]
+    focal_length: 14.0
+    clipping_range: [0.03, 3.0]
+    offset_pos: [0.13, 0.0, -0.15]
+    offset_rot_ros: [0.68734, -0.16602, -0.16602, 0.68734]
+    intent: "Static observer-arm wrist camera used as the global view of cube, red target, and actor arm."
+  table_camera:
+    enabled: false
+
+observations:
+  concatenate_terms: false
+  policy_terms:
+    wrist_rgb: [200, 200, 3]
+    observer_wrist_rgb: [200, 200, 3]
+    joint_pos: 9
+    joint_vel: 9
+    object_position: 3
+    target_area_position: 3
+    last_action: 7
+  planned_extra_terms:
+    eef_pose: 7
+    gripper_pos: 1
+    joint_pos_arm_only: 7
+  lerobot_export_first_pass:
+    observation.image.actor_wrist: "RGB image from the moving actor arm wrist camera"
+    observation.image.observer_wrist: "RGB image from the static observer arm wrist camera"
+    observation.eef_pose: 7
+    observation.gripper: 1
+    observation.joint_positions: 7
+    action: 7
+    next.reward: 1
+    next.success: 1
+
+success:
+  time_out_termination: disabled
+  placed_in_target:
+    cube_center_xy_inside_red_patch: true
+    stable_steps: 10
+    require_release: true
+    max_height_above_table_m: 0.03
+  failure_terms:
+    timeout: true
+    cube_dropped_below_table: true
+    severe_robot_collision: later
+
+scripted_expert_first_pass:
+  script: "/home/ubuntu/Workspace/seven_dof_pick_place_lbm/isaac_pick_place/scripts/scripted_pick_place.py"
+  status: "headless smoke success before release-height adjustment; adjusted grasp/release defaults need GUI validation"
+  default_parameters:
+    grasp_z: 0.015
+    release_z: 0.085
+    hover_z: 0.22
+    lift_z: 0.24
+  phases:
+    - open_gripper_rest
+    - move_above_cube
+    - descend_to_grasp
+    - close_gripper
+    - lift_cube
+    - move_above_red_target
+    - descend_to_release
+    - release_gripper
+    - retreat
+  output:
+    format: "relative IK pose action + binary gripper target"
+    dataset_target: "HF/LeRobot episode records"
+
+next_implementation_steps:
+  - "Visually inspect adjusted scripted_pick_place.py in GUI, especially lower grasp_z and free-fall release_z."
+  - "Extend scripted_pick_place.py into collect_scripted_demos.py or add an export mode."
+  - "Add richer report metrics: success term, placed_on_target, cube-target XY error, cube height, gripper opening."
+  - "Define HF/LeRobot dataset features and conversion path."

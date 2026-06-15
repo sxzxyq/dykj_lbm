@@ -1,0 +1,39 @@
+[INFO] task=Isaac-Cube-Pick-Place-Red-Target-Franka-IK-Rel-Visuomotor-v0
+[INFO] device=cuda:0
+[INFO] num_envs=1
+[INFO] observation_space=Dict('policy': Dict('actions': Box(-inf, inf, (1, 7), float32), 'ee_position': Box(-inf, inf, (1, 3), float32), 'ee_quat': Box(-inf, inf, (1, 4), float32), 'joint_pos': Box(-inf, inf, (1, 9), float32), 'joint_vel': Box(-inf, inf, (1, 9), float32), 'object_position': Box(-inf, inf, (1, 3), float32), 'observer_wrist_rgb': Box(-inf, inf, (1, 256, 256, 3), float32), 'target_area_position': Box(-inf, inf, (1, 3), float32), 'wrist_rgb': Box(-inf, inf, (1, 256, 256, 3), float32)))
+[INFO] action_space=Box(-inf, inf, (1, 7), float32)
+[INFO] scene_keys=['terrain', 'robot', 'observer_robot', 'object', 'ee_frame', 'wrist_cam', 'observer_wrist_cam', 'table', 'plane', 'light', 'target_area']
+[INFO] scene_sensors=['ee_frame', 'wrist_cam', 'observer_wrist_cam']
+obs: dict keys=['policy']
+obs.policy: dict keys=['joint_pos', 'joint_vel', 'object_position', 'actions', 'target_area_position', 'ee_position', 'ee_quat', 'wrist_rgb', 'observer_wrist_rgb']
+obs.policy.joint_pos: shape=(1, 9), dtype=torch.float32
+obs.policy.joint_vel: shape=(1, 9), dtype=torch.float32
+obs.policy.object_position: shape=(1, 3), dtype=torch.float32
+obs.policy.actions: shape=(1, 7), dtype=torch.float32
+obs.policy.target_area_position: shape=(1, 3), dtype=torch.float32
+obs.policy.ee_position: shape=(1, 3), dtype=torch.float32
+obs.policy.ee_quat: shape=(1, 4), dtype=torch.float32
+obs.policy.wrist_rgb: shape=(1, 256, 256, 3), dtype=torch.uint8
+obs.policy.observer_wrist_rgb: shape=(1, 256, 256, 3), dtype=torch.uint8
+[CAMERA refresh] wrist_cam: refreshed 1 prim(s), pos=(0.08, 0.0, 0.0375), opengl_rot=[0.253401, 0.660142, 0.660142, 0.253401]
+[CAMERA refresh] observer_wrist_cam: refreshed 1 prim(s), pos=(0.9, -0.2, -0.6), opengl_rot=[-0.285448, 0.855723, 0.118243, 0.415061]
+[CAMERA reset] wrist_cam.pos_w=[0.144569, 0.356569, 0.888500]
+[CAMERA reset] wrist_cam.quat_w_world=[0.375780, -0.349598, 0.844004, 0.155653]
+[CAMERA reset] wrist_cam.quat_w_ros=[0.331084, 0.862518, -0.357267, -0.137140]
+[CAMERA reset] observer_wrist_cam.pos_w=[0.582975, 0.277817, 1.526000]
+[CAMERA reset] observer_wrist_cam.quat_w_world=[0.114893, -0.228239, 0.502713, 0.825824]
+[CAMERA reset] observer_wrist_cam.quat_w_ros=[-0.104882, 0.835835, 0.218229, -0.492703]
+[INFO] action_mode=zero
+[INFO] action_shape=(1, 7)
+[STEP 1] reward=[-2.9320094066068594e-19], terminated=tensor([False], device='cuda:0'), truncated=tensor([False], device='cuda:0'), info_keys=['log']
+[CAMERA step_000001] wrist_cam.pos_w=[0.144569, 0.356569, 0.888500]
+[CAMERA step_000001] wrist_cam.quat_w_world=[0.375780, -0.349598, 0.844004, 0.155653]
+[CAMERA step_000001] wrist_cam.quat_w_ros=[0.331084, 0.862518, -0.357267, -0.137140]
+[CAMERA step_000001] observer_wrist_cam.pos_w=[0.582975, 0.277817, 1.526000]
+[CAMERA step_000001] observer_wrist_cam.quat_w_world=[0.114893, -0.228239, 0.502713, 0.825824]
+[CAMERA step_000001] observer_wrist_cam.quat_w_ros=[-0.104882, 0.835835, 0.218229, -0.492703]
+[CAMERA step_000001] saved wrist_cam rgb to /home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/camera_debug_runs/camera_check_20260611_144440/step_000001_wrist_cam.png
+[CAMERA step_000001] saved observer_wrist_cam rgb to /home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/camera_debug_runs/camera_check_20260611_144440/step_000001_observer_wrist_cam.png
+[STEP 2] reward=[-2.925117958128527e-19], terminated=tensor([False], device='cuda:0'), truncated=tensor([False], device='cuda:0'), info_keys=['log']
+[OK] Smoke test completed.

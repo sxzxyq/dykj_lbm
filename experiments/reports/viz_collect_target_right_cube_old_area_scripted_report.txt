@@ -1,0 +1,36 @@
+[INFO] task=Isaac-Cube-Pick-Place-Red-Target-Franka-IK-Rel-Visuomotor-v0
+[INFO] device=cuda:0
+[INFO] num_envs=1
+[INFO] action_space=Box(-inf, inf, (1, 7), float32)
+[INFO] phases=['open_gripper_rest', 'move_above_cube', 'descend_to_grasp', 'close_gripper', 'lift_cube', 'move_above_red_target', 'descend_to_release', 'release_gripper', 'retreat', 'done']
+[INFO] waypoints=grasp_z=0.015, release_z=0.085, hover_z=0.2, lift_z=0.19, target_xy=(0.67, 0.0)
+[INFO] recording raw demos to /home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/raw_demos/raw_demos_viz_collect_target_right_cube_old_area
+[INFO] success-driven collection=target_success_episodes=1, max_attempts=1
+[EP 1] reset obs_keys=['policy']
+[CAMERA refresh] wrist_cam: refreshed 1 prim(s)
+[CAMERA refresh] observer_wrist_cam: refreshed 1 prim(s)
+[EP 1 STEP 1] phase=['open_gripper_rest'] dist=[0.0] cube_target_xy_error=[0.15535807609558105] cube_z=[0.016999777406454086] gripper_opening=[0.07999999821186066] reward=[4.551410711428616e-06] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 25] phase=['move_above_cube'] dist=[0.2716389298439026] cube_target_xy_error=[0.1553582102060318] cube_z=[0.01699984259903431] gripper_opening=[0.07999935746192932] reward=[4.722855010186322e-06] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 50] phase=['move_above_cube'] dist=[0.2291618138551712] cube_target_xy_error=[0.1553582102060318] cube_z=[0.016999846324324608] gripper_opening=[0.07999995350837708] reward=[1.1290052498225123e-05] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 75] phase=['move_above_cube'] dist=[0.18663375079631805] cube_target_xy_error=[0.1553582102060318] cube_z=[0.01699981838464737] gripper_opening=[0.07999996840953827] reward=[2.6637273549567908e-05] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 100] phase=['move_above_cube'] dist=[0.14409461617469788] cube_target_xy_error=[0.1553582102060318] cube_z=[0.01699982024729252] gripper_opening=[0.07999996095895767] reward=[6.232858140720055e-05] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 125] phase=['move_above_cube'] dist=[0.09619629383087158] cube_target_xy_error=[0.1553582102060318] cube_z=[0.016999827697873116] gripper_opening=[0.0799998939037323] reward=[0.00016649744065944105] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 150] phase=['move_above_cube'] dist=[0.029896723106503487] cube_target_xy_error=[0.1553582102060318] cube_z=[0.016999822109937668] gripper_opening=[0.07999992370605469] reward=[0.0006362785934470594] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 175] phase=['descend_to_grasp'] dist=[0.1497991681098938] cube_target_xy_error=[0.1553582102060318] cube_z=[0.016999822109937668] gripper_opening=[0.07999996840953827] reward=[0.002080233534798026] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 200] phase=['descend_to_grasp'] dist=[0.08718056231737137] cube_target_xy_error=[0.1553582102060318] cube_z=[0.016999835148453712] gripper_opening=[0.07999995350837708] reward=[0.006399958860129118] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 225] phase=['descend_to_grasp'] dist=[0.03392823785543442] cube_target_xy_error=[0.1553582102060318] cube_z=[0.016999859362840652] gripper_opening=[0.07999987155199051] reward=[0.014139515347778797] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 250] phase=['close_gripper'] dist=[0.0065830182284116745] cube_target_xy_error=[0.15133538842201233] cube_z=[0.01698622852563858] gripper_opening=[0.03763791173696518] reward=[0.018946021795272827] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 275] phase=['lift_cube'] dist=[0.16842880845069885] cube_target_xy_error=[0.13978996872901917] cube_z=[0.018734756857156754] gripper_opening=[0.03762388229370117] reward=[0.018961410969495773] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 300] phase=['lift_cube'] dist=[0.12719210982322693] cube_target_xy_error=[0.13973097503185272] cube_z=[0.0599747858941555] gripper_opening=[0.03761841356754303] reward=[0.258492648601532] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 325] phase=['lift_cube'] dist=[0.08579494059085846] cube_target_xy_error=[0.13896185159683228] cube_z=[0.10139402747154236] gripper_opening=[0.037611737847328186] reward=[0.25901055335998535] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 350] phase=['lift_cube'] dist=[0.04457691311836243] cube_target_xy_error=[0.1370471864938736] cube_z=[0.1426980048418045] gripper_opening=[0.03760341554880142] reward=[0.26031622290611267] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 375] phase=['move_above_red_target'] dist=[0.12820158898830414] cube_target_xy_error=[0.1235707551240921] cube_z=[0.17714862525463104] gripper_opening=[0.03759487718343735] reward=[0.2707456350326538] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 400] phase=['move_above_red_target'] dist=[0.08653151243925095] cube_target_xy_error=[0.08193110674619675] cube_z=[0.17908784747123718] gripper_opening=[0.037592563778162] reward=[0.30700525641441345] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 425] phase=['move_above_red_target'] dist=[0.044957235455513] cube_target_xy_error=[0.04041346162557602] cube_z=[0.18164196610450745] gripper_opening=[0.03759019821882248] reward=[0.37089648842811584] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 450] phase=['descend_to_release'] dist=[0.09784581512212753] cube_target_xy_error=[0.0057509480975568295] cube_z=[0.17938756942749023] gripper_opening=[0.037589170038700104] reward=[0.47670891880989075] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 475] phase=['descend_to_release'] dist=[0.053282540291547775] cube_target_xy_error=[0.002134195528924465] cube_z=[0.13493973016738892] gripper_opening=[0.03759342432022095] reward=[0.4910549819469452] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 500] phase=['release_gripper'] dist=[0.009687665849924088] cube_target_xy_error=[0.002397497883066535] cube_z=[0.08494018763303757] gripper_opening=[0.053837746381759644] reward=[0.483577698469162] success=[False] terminated=[False] truncated=[False]
+[EP 1 STEP 511] phase=['release_gripper'] dist=[0.0024794694036245346] cube_target_xy_error=[0.003101478097960353] cube_z=[0.016999932006001472] gripper_opening=[0.07966339588165283] reward=[0.5079159140586853] success=[True] terminated=[True] truncated=[False]
+[EP 1] final_success=[True] terminated=[True] truncated=[False] steps=511
+[SUMMARY] successes=1/1 attempts=1
+[OK] Scripted rollout completed.

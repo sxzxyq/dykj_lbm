@@ -1,0 +1,29 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+outputs_pick_place/datasets/
+outputs_pick_place/checkpoints/
+outputs_pick_place/eval_videos/
+
+# Large experiment artifacts. Keep lightweight experiment docs/reports tracked.
+experiments/raw_demos/
+experiments/lerobot_datasets/
+experiments/training_runs/
+experiments/eval_videos/
+experiments/camera_debug_runs/
+experiments/smoke_runs/
+
+# Common generated media/model/data artifacts.
+*.log
+*.mp4
+*.avi
+*.png
+*.jpg
+*.jpeg
+*.safetensors
+*.pt
+*.pth
+*.parquet
