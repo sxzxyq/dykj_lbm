@@ -1038,6 +1038,11 @@ def _load_policy_weights(policy: torch.nn.Module, checkpoint: Path, device: torc
         _log(f"[WARN] first_missing_keys={list(missing_keys)[:10]}")
     if unexpected_keys:
         _log(f"[WARN] first_unexpected_keys={list(unexpected_keys)[:10]}")
+    if missing_keys or unexpected_keys:
+        raise RuntimeError(
+            "Checkpoint weights do not fully match policy model: "
+            f"missing_keys={len(missing_keys)} unexpected_keys={len(unexpected_keys)}"
+        )
 
 
 class EpisodeDiagnostics:

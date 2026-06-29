@@ -1559,6 +1559,7 @@ class EvalRecorder:
         self.recorded_steps = 0
 
     def start_episode(self, episode: int, env, config, fixed_cube_xy: tuple[float, float] | None = None) -> None:
+        self.close()
         self.episode_dir = self.root_dir / f"episode_{episode:06d}"
         self.episode_dir.mkdir(parents=True, exist_ok=True)
         self.steps_file = (self.episode_dir / "steps.jsonl").open("w", encoding="utf-8")
@@ -1776,13 +1777,16 @@ class EvalRecorder:
                 )
         if self.episode_dir is not None:
             (self.episode_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+        self.close()
+        return summary
+
+    def close(self) -> None:
         if self.steps_file is not None:
             self.steps_file.close()
             self.steps_file = None
         if self.policy_inputs_file is not None:
             self.policy_inputs_file.close()
             self.policy_inputs_file = None
-        return summary
 
 
 def _write_report(output_dir: Path) -> None:
@@ -1846,6 +1850,11 @@ def _load_policy_weights(policy: torch.nn.Module, checkpoint: Path, device: torc
         _log(f"[WARN] first_missing_keys={list(missing_keys)[:10]}")
     if unexpected_keys:
         _log(f"[WARN] first_unexpected_keys={list(unexpected_keys)[:10]}")
+    if missing_keys or unexpected_keys:
+        raise RuntimeError(
+            "Checkpoint weights do not fully match policy model: "
+            f"missing_keys={len(missing_keys)} unexpected_keys={len(unexpected_keys)}"
+        )
 
 
 def main() -> None:
@@ -2028,6 +2037,7 @@ def main() -> None:
         )
     if state_dim == 49:
         _log(f"[INFO] handoff_time_total_steps={args_cli.handoff_time_total_steps}")
+    handoff_progress_denominator = max(args_cli.handoff_time_total_steps - 1, 1)
     if args_cli.force_handoff_active_arm_mask:
         _log("[INFO] force_handoff_active_arm_mask=True (eval-only execution mask)")
     teacher_forced_live_image_keys = _parse_image_key_set(args_cli.teacher_forced_live_image_keys)
@@ -2066,7 +2076,7 @@ def main() -> None:
                 if action_representation == ACTION_REPRESENTATION_ABSOLUTE_JOINT_POS:
                     warmup_actions = _current_abs_joint_pos_action(env, env_device)
                     if args_cli.warmup_open_gripper:
-                        warmup_actions[:, [7, 8, 16, 17]] = OPEN_ACTION
+                        warmup_actions[:, [7, 8, 16, 17]] = GRIPPER_OPEN_COMMAND
                 else:
                     warmup_actions = torch.zeros(env.action_space.shape, device=env_device)
                 if (
@@ -2116,7 +2126,7 @@ def main() -> None:
             for step in range(args_cli.max_steps):
                 if not simulation_app.is_running():
                     break
-                episode_progress = min(step / args_cli.handoff_time_total_steps, 1.0) if state_dim == 49 else None
+                episode_progress = min(step / handoff_progress_denominator, 1.0) if state_dim == 49 else None
                 with torch.no_grad():
                     teacher_forced_sample = None
                     teacher_forced_extra = None
@@ -2417,6 +2427,7 @@ def main() -> None:
             _log(f"[ERROR] {type(exc).__name__}: {exc}")
             raise
     finally:
+        recorder.close()
         try:
             env.close()
         except Exception as exc:

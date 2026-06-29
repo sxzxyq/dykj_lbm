@@ -5,11 +5,11 @@ set -euo pipefail
 #
 # Example:
 #   CHECKPOINT=/path/to/checkpoint_23000 \
-#     bash isaac_pick_place/scripts/diagnose_handoff_hybrid_eval.sh
+#     bash isaac_pick_place/scripts/eval/diagnose_handoff_hybrid_eval.sh
 #
 # Common overrides:
-#   COMBOS=expert_expert EPISODES=1 HEADLESS=1 bash isaac_pick_place/scripts/diagnose_handoff_hybrid_eval.sh
-#   RECORD_IMAGE_EVERY=5 RUN_NAME=hybrid_debug bash isaac_pick_place/scripts/diagnose_handoff_hybrid_eval.sh
+#   COMBOS=expert_expert EPISODES=1 HEADLESS=1 bash isaac_pick_place/scripts/eval/diagnose_handoff_hybrid_eval.sh
+#   RECORD_IMAGE_EVERY=5 RUN_NAME=hybrid_debug bash isaac_pick_place/scripts/eval/diagnose_handoff_hybrid_eval.sh
 
 PROJECT_ROOT="${PROJECT_ROOT:-/home/ubuntu/Workspace/seven_dof_pick_place_lbm}"
 ISAACLAB_DIR="${ISAACLAB_DIR:-/home/ubuntu/Workspace/IsaacLab}"
@@ -22,7 +22,7 @@ CHECKPOINT="${CHECKPOINT:-}"
 if [[ -z "${CHECKPOINT}" ]]; then
   echo "[ERROR] CHECKPOINT is required, for example:"
   echo "  CHECKPOINT=${PROJECT_ROOT}/experiments/training_runs/.../checkpoint_23000 \\"
-  echo "    bash ${PROJECT_ROOT}/isaac_pick_place/scripts/diagnose_handoff_hybrid_eval.sh"
+  echo "    bash ${PROJECT_ROOT}/isaac_pick_place/scripts/eval/diagnose_handoff_hybrid_eval.sh"
   exit 2
 fi
 

@@ -341,7 +341,7 @@ def _load_policy_weights(policy: torch.nn.Module, checkpoint: Path, device: torc
     model_keys = set(policy.state_dict().keys())
     state_dict, remap_count = _remap_transformers5_clip_keys(state_dict, model_keys)
     missing_keys, unexpected_keys = policy.load_state_dict(state_dict, strict=False)
-    return {
+    report = {
         "weight_file": str(weight_file),
         "compat_key_remaps": remap_count,
         "missing_keys": len(missing_keys),
@@ -349,6 +349,13 @@ def _load_policy_weights(policy: torch.nn.Module, checkpoint: Path, device: torc
         "first_missing_keys": list(missing_keys)[:10],
         "first_unexpected_keys": list(unexpected_keys)[:10],
     }
+    if missing_keys or unexpected_keys:
+        raise RuntimeError(
+            "Checkpoint weights do not fully match policy model: "
+            f"missing_keys={len(missing_keys)} first_missing={report['first_missing_keys']} "
+            f"unexpected_keys={len(unexpected_keys)} first_unexpected={report['first_unexpected_keys']}"
+        )
+    return report
 
 
 def _policy_obs(obs) -> dict:

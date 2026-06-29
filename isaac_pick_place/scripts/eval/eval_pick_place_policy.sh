@@ -4,14 +4,14 @@ set -euo pipefail
 # Run closed-loop visual evaluation for a trained MultiTask DiT checkpoint.
 #
 # Example:
-#   CHECKPOINT=/path/to/checkpoint_30000 bash isaac_pick_place/scripts/eval_pick_place_policy.sh
+#   CHECKPOINT=/path/to/checkpoint_30000 bash isaac_pick_place/scripts/eval/eval_pick_place_policy.sh
 #
 # Common overrides:
-#   EPISODES=10 MAX_STEPS=900 N_ACTION_STEPS=8 bash isaac_pick_place/scripts/eval_pick_place_policy.sh
-#   OUTPUT_DIR=/path/to/eval_out RECORD_IMAGE_EVERY=1 SAVE_VIDEO=1 bash isaac_pick_place/scripts/eval_pick_place_policy.sh
-#   HEADLESS=0 SAVE_VIDEO=0 bash isaac_pick_place/scripts/eval_pick_place_policy.sh
-#   FIXED_CUBE_XY=0.50,-0.10 bash isaac_pick_place/scripts/eval_pick_place_policy.sh
-#   FIXED_CUBE_XY_LIST='0.36,-0.15;0.40,-0.11' bash isaac_pick_place/scripts/eval_pick_place_policy.sh
+#   EPISODES=10 MAX_STEPS=900 N_ACTION_STEPS=8 bash isaac_pick_place/scripts/eval/eval_pick_place_policy.sh
+#   OUTPUT_DIR=/path/to/eval_out RECORD_IMAGE_EVERY=1 SAVE_VIDEO=1 bash isaac_pick_place/scripts/eval/eval_pick_place_policy.sh
+#   HEADLESS=0 SAVE_VIDEO=0 bash isaac_pick_place/scripts/eval/eval_pick_place_policy.sh
+#   FIXED_CUBE_XY=0.50,-0.10 bash isaac_pick_place/scripts/eval/eval_pick_place_policy.sh
+#   FIXED_CUBE_XY_LIST='0.36,-0.15;0.40,-0.11' bash isaac_pick_place/scripts/eval/eval_pick_place_policy.sh
 
 PROJECT_ROOT="${PROJECT_ROOT:-/home/ubuntu/Workspace/seven_dof_pick_place_lbm}"
 ISAACLAB_DIR="${ISAACLAB_DIR:-/home/ubuntu/Workspace/IsaacLab}"
@@ -24,7 +24,7 @@ CHECKPOINT="${CHECKPOINT:-}"
 if [[ -z "${CHECKPOINT}" ]]; then
   echo "[ERROR] CHECKPOINT is required, for example:"
   echo "  CHECKPOINT=${PROJECT_ROOT}/experiments/training_runs/hf_mtdp_random_cube_256_v0_100success_bs32acc2_30k/checkpoint_30000 \\"
-  echo "    bash ${PROJECT_ROOT}/isaac_pick_place/scripts/eval_pick_place_policy.sh"
+  echo "    bash ${PROJECT_ROOT}/isaac_pick_place/scripts/eval/eval_pick_place_policy.sh"
   exit 2
 fi
 

@@ -189,8 +189,8 @@ bash isaac_pick_place/scripts/train/train_handoff_simple_state_absjoint18_256_mt
 # 闭环评估
 CHECKPOINT=/path/to/final_model bash isaac_pick_place/scripts/eval/eval_pick_place_policy.sh
 
-# 离线 open-loop 评估
-python isaac_pick_place/scripts/eval/openloop_eval_policy.py \
+# 离线 open-loop 评估，需要 LeRobot/MultiTask-DiT Python 环境
+/home/ubuntu/Workspace/multitask_dit_policy/.venv/bin/python isaac_pick_place/scripts/eval/openloop_eval_policy.py \
   --checkpoint /path/to/final_model \
   --dataset-dir /path/to/lerobot_dataset
 ```
