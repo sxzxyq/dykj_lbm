@@ -60,7 +60,7 @@ echo
 cd "${ISAACLAB_DIR}"
 
 SCRIPTED_ARGS=(
-  "${PROJECT_ROOT}/isaac_pick_place/scripts/scripted_pick_place.py" \
+  "${PROJECT_ROOT}/isaac_pick_place/scripts/collect/scripted_pick_place.py" \
   --task "${TASK}" \
   --num_envs 1 \
   --episodes "${EPISODES}" \
@@ -89,7 +89,7 @@ fi
 
 cd "${PROJECT_ROOT}"
 
-"${CONVERT_PYTHON}" "${PROJECT_ROOT}/isaac_pick_place/scripts/convert_raw_demos_to_lerobot.py" \
+"${CONVERT_PYTHON}" "${PROJECT_ROOT}/isaac_pick_place/scripts/convert/convert_raw_demos_to_lerobot.py" \
     --raw-dir "${RAW_DIR}" \
     --output-dir "${LEROBOT_DIR}" \
     --repo-id "${REPO_ID}" \

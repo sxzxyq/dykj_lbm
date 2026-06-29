@@ -117,34 +117,45 @@ camera:
     source_reference: "Adjusted from Isaac-Stack-Cube-Franka-IK-Rel-Visuomotor-v0 after GUI wrist-view check."
     prim_path: "{ENV_REGEX_NS}/Robot/panda_hand/wrist_cam"
     mount_parent: panda_hand
-    height: 200
-    width: 200
+    height: 256
+    width: 256
     data_types: ["rgb"]
     focal_length: 18.0
     clipping_range: [0.03, 2.0]
-    offset_pos: [0.13, 0.0, -0.15]
-    offset_rot_ros: [0.68734, -0.16602, -0.16602, 0.68734]
-    forward_axis_in_hand_frame: [-0.456, 0.0, 0.890]
+    offset_pos: [0.08, 0.0, 0.0375]
+    offset_rot_ros: [0.66014, -0.25340, -0.25340, 0.66014]
     intent: "Eye-in-hand side view aimed toward the TCP/gripper center so cube and red target remain visible."
   observer_wrist:
     prim_path: "{ENV_REGEX_NS}/ObserverRobot/panda_hand/observer_wrist_cam"
     mount_parent: "observer_robot/panda_hand"
-    height: 200
-    width: 200
+    height: 256
+    width: 256
+    data_types: ["rgb"]
+    focal_length: 18.0
+    clipping_range: [0.03, 2.0]
+    offset_pos: [0.08, 0.0, 0.0375]
+    offset_rot_ros: [0.66014, -0.25340, -0.25340, 0.66014]
+    intent: "Static second-arm wrist camera with the same local mount pose as actor_wrist."
+  global:
+    prim_path: "{ENV_REGEX_NS}/GlobalCamera"
+    mount_parent: env_root
+    height: 256
+    width: 256
     data_types: ["rgb"]
     focal_length: 14.0
-    clipping_range: [0.03, 3.0]
-    offset_pos: [0.13, 0.0, -0.15]
-    offset_rot_ros: [0.68734, -0.16602, -0.16602, 0.68734]
-    intent: "Static observer-arm wrist camera used as the global view of cube, red target, and actor arm."
-  table_camera:
-    enabled: false
+    clipping_range: [0.05, 3.0]
+    offset_pos: [0.20, 0.00, 1.00]
+    offset_rot_opengl: [0.69527, 0.12886, -0.12886, -0.69527]
+    offset_convention: opengl
+    pose_source: "Adjusted manually in Isaac UI Transform panel; quaternion stored as [w, x, y, z]."
+    intent: "Fixed overhead head-style camera looking down at both arms, cube, and red target."
 
 observations:
   concatenate_terms: false
   policy_terms:
-    wrist_rgb: [200, 200, 3]
-    observer_wrist_rgb: [200, 200, 3]
+    wrist_rgb: [256, 256, 3]
+    observer_wrist_rgb: [256, 256, 3]
+    global_rgb: [256, 256, 3]
     joint_pos: 9
     joint_vel: 9
     object_position: 3
@@ -155,8 +166,9 @@ observations:
     gripper_pos: 1
     joint_pos_arm_only: 7
   lerobot_export_first_pass:
-    observation.image.actor_wrist: "RGB image from the moving actor arm wrist camera"
-    observation.image.observer_wrist: "RGB image from the static observer arm wrist camera"
+    observation.images.wrist_rgb: "RGB image from the moving actor arm wrist camera"
+    observation.images.observer_wrist_rgb: "RGB image from the static observer arm wrist camera"
+    observation.images.global_rgb: "RGB image from the fixed overhead global camera"
     observation.eef_pose: 7
     observation.gripper: 1
     observation.joint_positions: 7

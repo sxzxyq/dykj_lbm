@@ -78,6 +78,989 @@
 
 ## 实验记录
 
+### 2026-06-22 14:10 CST - Handoff BiRelPose Time 30k Ep1 Headless Eval
+
+**Type:** eval
+
+**Goal**
+- 使用训练完成的 49D `handoff_joint_ee_birelpose_time` 模型跑 1 条 handoff 在线推理，并保存三路视频。
+
+**Setup**
+- Checkpoint：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_3cam_joint_ee_birelpose_time_100success_bs16acc4_30k/final_model`
+- Task：`Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0`
+- State mode：`handoff_joint_ee_birelpose_time`
+- State dim：`49`
+- Action dim：`14`
+- 三路图像：`wrist_rgb`、`observer_wrist_rgb`、`global_rgb`
+- `HANDOFF_TIME_TOTAL_STEPS=1845`
+- `MAX_STEPS=3000`
+- `RECORD_IMAGE_EVERY=5`
+
+**Command**
+```bash
+cd /home/ubuntu/Workspace/seven_dof_pick_place_lbm
+
+CHECKPOINT=/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_3cam_joint_ee_birelpose_time_100success_bs16acc4_30k/final_model \
+TASK=Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0 \
+TASK_TEXT="Right arm moves the blue cube to the yellow handoff area, then left arm moves it to the red target area." \
+RUN_NAME=eval_handoff_birelpose_time_30k_ep1 \
+HEADLESS=1 \
+EPISODES=1 \
+MAX_STEPS=3000 \
+SAVE_VIDEO=1 \
+RECORD_IMAGE_EVERY=5 \
+LOG_EVERY=25 \
+HANDOFF_TIME_TOTAL_STEPS=1845 \
+bash isaac_pick_place/scripts/eval_pick_place_policy.sh
+```
+
+**Result**
+- Isaac env 正常启动，policy 权重加载成功：
+```text
+missing_keys=0 unexpected_keys=0
+state_dim=49 state_mode=handoff_joint_ee_birelpose_time
+```
+- 评估输出：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/eval_videos/eval_handoff_birelpose_time_30k_ep1`
+- 结果：
+```text
+successes=0/1
+success_rate=0.0
+steps=3000
+yellow_seen=False
+red_success=False
+```
+- 三路视频均已生成：
+```text
+episode_000000/wrist_rgb.mp4
+episode_000000/observer_wrist_rgb.mp4
+episode_000000/global_rgb.mp4
+```
+- 每路抽帧 `600` 张。
+- rollout 过程中 cube 从初始约 `(0.448, -0.284, 0.017)` 被轻微推到约 `(0.483, -0.279, 0.017)` 后基本停住，未进入黄色区域，也没有形成最终红区成功。
+
+**Interpretation**
+- 49D 完整动作模型可以在线加载和执行，但当前这条测试未学出有效第一阶段 handoff 行为。
+- 相比 43D subtask/active-arm 版本，去掉显式阶段和 active-arm 提示后，单一时间进度 + 双向相对位姿不足以在这条随机初始状态上稳定启动右臂抓取。
+- 后续需要看视频确认失败形态：是右臂接触/推走方块、夹爪时序错误，还是时间进度驱动下动作幅度衰减。
+
+**Next**
+- 先查看 `global_rgb.mp4` 和两路腕部视频，确认失败动作。
+- 若失败是“没有明确进入右臂抓取阶段”，考虑恢复更弱的阶段提示，或把 `episode_progress` 改为非饱和/分段连续进度，而不是 1845 step 后固定 1.0。
+
+### 2026-06-22 13:59 CST - Handoff BiRelPose Time 30k 推理前 GPU 阻塞检查
+
+**Type:** eval | debug
+
+**Goal**
+- 使用训练完成的 49D `handoff_joint_ee_birelpose_time` 模型跑 handoff 在线推理并保存视频。
+
+**Setup**
+- Checkpoint：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_3cam_joint_ee_birelpose_time_100success_bs16acc4_30k/final_model`
+- 预期任务：`Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0`
+- 预期 state/action：`observation.state.shape=[49]`，`action.shape=[14]`
+- 图像输入：`wrist_rgb`、`observer_wrist_rgb`、`global_rgb`
+
+**Command**
+```bash
+cd /home/ubuntu/Workspace/seven_dof_pick_place_lbm
+
+nvidia-smi
+
+python - <<'PY'
+from pathlib import Path
+import json
+ckpt = Path('/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_3cam_joint_ee_birelpose_time_100success_bs16acc4_30k/final_model')
+config = json.loads((ckpt / 'config.json').read_text())
+print('state_shape=', config['input_features']['observation.state']['shape'])
+print('action_shape=', config['output_features']['action']['shape'])
+print('image_features=', [k for k in config['input_features'] if k.startswith('observation.images.')])
+PY
+
+lsmod | rg '^nvidia|^nouveau' || true
+dkms status 2>/dev/null | rg 'nvidia|NVIDIA' || true
+lspci | rg -i 'nvidia|vga|3d' || true
+cat /proc/driver/nvidia/version 2>/dev/null || true
+find /proc/driver/nvidia -maxdepth 3 -type f -name information -print -exec cat {} \; 2>/dev/null || true
+```
+
+**Result**
+- Checkpoint 文件存在，`config.json` 验证通过：
+  - `state_shape=[49]`
+  - `action_shape=[14]`
+  - 三路图像输入均存在。
+- `nvidia-smi` 失败：
+```text
+NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver.
+```
+- 内核模块存在：
+```text
+nvidia_uvm
+nvidia_drm
+nvidia_modeset
+nvidia
+```
+- DKMS 显示 `nvidia/580.65.06` 已安装到 `6.5.0-18-generic` 和 `6.8.0-124-generic`。
+- `/proc/driver/nvidia/version` 显示 `NVIDIA UNIX Open Kernel Module 580.65.06`。
+- `/proc/driver/nvidia/gpus/0000:01:00.0/information` 能看到 GPU UUID，`GPU Excluded: No`。
+- 因为 NVML 当前不可通信，未启动 Isaac eval；预计会在环境创建/CUDA 初始化阶段失败。
+
+**Interpretation**
+- 49D checkpoint 本身可读，模型配置与新推理脚本匹配。
+- 当前阻塞点是系统 GPU/NVIDIA driver runtime 状态，不是模型、数据集或 eval 逻辑。
+- 需要先恢复 `nvidia-smi` 正常，再跑 Isaac 推理。
+
+**Next**
+- 恢复 GPU 驱动后，使用同一 checkpoint 跑 49D handoff eval：
+```bash
+cd /home/ubuntu/Workspace/seven_dof_pick_place_lbm
+
+CHECKPOINT=/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_3cam_joint_ee_birelpose_time_100success_bs16acc4_30k/final_model \
+TASK=Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0 \
+TASK_TEXT="Right arm moves the blue cube to the yellow handoff area, then left arm moves it to the red target area." \
+RUN_NAME=eval_handoff_birelpose_time_30k_ep1 \
+HEADLESS=1 \
+EPISODES=1 \
+MAX_STEPS=3000 \
+SAVE_VIDEO=1 \
+RECORD_IMAGE_EVERY=5 \
+LOG_EVERY=25 \
+HANDOFF_TIME_TOTAL_STEPS=1845 \
+bash isaac_pick_place/scripts/eval_pick_place_policy.sh
+```
+
+### 2026-06-18 14:30 CST - Handoff BiRelPose Time 49D State Layout Implementation Smoke
+
+**Type:** data | train | eval | debug
+
+**Goal**
+- 新增 handoff `handoff_joint_ee_birelpose_time` 观测版本：三路图像 + 两臂关节/末端状态 + 双向 TCP 相对位姿 + 单一连续时间进度。
+- 不在 `observation.state` 中使用 `stage_id`、`active_arm_id`、`subtask_onehot`、`active_arm_onehot`、`cube_pos_w`、`yellow_area_pos_w`、`red_area_pos_w`。
+- 输出继续保持完整 `14D` 双臂 action；在线推理时不启用 subtask scheduler 或 inactive-arm mask。
+
+**Setup**
+- 代码路径：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm`
+- Raw 数据：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/raw_demos/raw_handoff_handoff_100_joint_ee_3cam_v1`
+- Smoke LeRobot 数据集：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/lerobot_datasets/lerobot_handoff_birelpose_time_smoke`
+- Smoke 训练输出：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_birelpose_time_smoke`
+- Eval smoke 输出：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/eval_videos/eval_handoff_birelpose_time_smoke`
+- 推理时间标量：`episode_progress = min(current_env_step / HANDOFF_TIME_TOTAL_STEPS, 1.0)`，默认 `HANDOFF_TIME_TOTAL_STEPS=1845`
+
+**Command**
+```bash
+cd /home/ubuntu/Workspace/seven_dof_pick_place_lbm
+
+python -m py_compile \
+  isaac_pick_place/scripts/convert_handoff_raw_demos_to_lerobot.py \
+  isaac_pick_place/scripts/train_hf_mtdp_smoke.py \
+  isaac_pick_place/scripts/eval_pick_place_policy.py
+
+bash -n isaac_pick_place/scripts/train_handoff_birelpose_time_256_mtdp.sh
+bash -n isaac_pick_place/scripts/eval_pick_place_policy.sh
+git diff --check -- \
+  isaac_pick_place/scripts/convert_handoff_raw_demos_to_lerobot.py \
+  isaac_pick_place/scripts/train_hf_mtdp_smoke.py \
+  isaac_pick_place/scripts/eval_pick_place_policy.py \
+  isaac_pick_place/scripts/eval_pick_place_policy.sh \
+  isaac_pick_place/scripts/train_handoff_birelpose_time_256_mtdp.sh
+
+/home/ubuntu/Workspace/multitask_dit_policy/.venv/bin/python \
+  isaac_pick_place/scripts/convert_handoff_raw_demos_to_lerobot.py \
+  --raw-dir /home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/raw_demos/raw_handoff_handoff_100_joint_ee_3cam_v1 \
+  --output-dir /home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/lerobot_datasets/lerobot_handoff_birelpose_time_smoke \
+  --repo-id local/seven_dof_pick_place_lbm_handoff_birelpose_time_smoke \
+  --state-layout handoff_joint_ee_birelpose_time \
+  --skip-failed \
+  --max-episodes 2 \
+  --require-episodes 2 \
+  --overwrite
+
+DATASET_DIR=/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/lerobot_datasets/lerobot_handoff_birelpose_time_smoke \
+RUN_NAME=hf_mtdp_handoff_birelpose_time_smoke \
+STEPS=2 \
+BATCH_SIZE=1 \
+GRAD_ACCUM_STEPS=1 \
+TENSORBOARD=0 \
+bash isaac_pick_place/scripts/train_handoff_birelpose_time_256_mtdp.sh
+
+CHECKPOINT=/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_birelpose_time_smoke/final_model \
+TASK=Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0 \
+TASK_TEXT="Right arm moves the blue cube to the yellow handoff area, then left arm moves it to the red target area." \
+RUN_NAME=eval_handoff_birelpose_time_smoke \
+HEADLESS=1 \
+EPISODES=1 \
+MAX_STEPS=5 \
+SAVE_VIDEO=0 \
+RECORD_IMAGE_EVERY=0 \
+LOG_EVERY=1 \
+HANDOFF_TIME_TOTAL_STEPS=1845 \
+bash isaac_pick_place/scripts/eval_pick_place_policy.sh
+```
+
+**Result**
+- 静态检查通过：`py_compile`、`bash -n`、`git diff --check` 均无报错。
+- 转换 smoke 成功：2 条 episode，`3634` 帧；reload check 通过。
+- `meta/info.json` 中 `observation.state.shape == [49]`，包含：
+  - `right_tcp_pos_in_left_tcp_frame.*`
+  - `right_tcp_quat_in_left_tcp_frame.*`
+  - `left_tcp_pos_in_right_tcp_frame.*`
+  - `left_tcp_quat_in_right_tcp_frame.*`
+  - `episode_progress.0`
+- 49D state names 不包含 `stage`、`active_arm`、`subtask`、`cube_pos_w`、`yellow_area_pos_w`、`red_area_pos_w`。
+- 抽查 episode 0：`episode_progress` 第一帧为 `0.0`，最后一帧为 `1.0`。
+- 训练 smoke 成功：`STEPS=2`，生成 checkpoint `/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_birelpose_time_smoke/final_model`。
+- Checkpoint config 验证：三路图像输入，`observation.state.shape=[49]`，`action.shape=[14]`。
+- Eval smoke 加载 checkpoint 成功，权重兼容映射后 `missing_keys=0 unexpected_keys=0`；Isaac 环境创建阶段失败，原因是当前系统 CUDA/NVIDIA 驱动不可用：
+```text
+RuntimeError: No CUDA GPUs are available
+NVML_ERROR_DRIVER_NOT_LOADED: NVIDIA driver is not loaded.
+```
+
+**Interpretation**
+- 49D 数据布局、训练入口、checkpoint 配置和推理侧 state 识别已经打通。
+- 当前 eval 失败是机器 GPU/驱动状态阻塞，不是 49D checkpoint 或权重加载问题。
+- 这版模型不再依赖显式阶段/active-arm 提示，时间进度只提供一个连续标量；能否学会完整时序需要完整数据集训练后再用可用 GPU 评估。
+
+**Next**
+- GPU/驱动恢复后，先用 smoke checkpoint 跑 5 step eval 验证 49D 在线 state 构造可执行。
+- 转换完整 100 条到 `lerobot_handoff_handoff_100_joint_ee_3cam_v1_birelpose_time` 后，使用 `train_handoff_birelpose_time_256_mtdp.sh` 跑正式训练。
+
+### 2026-06-18 12:20 CST - Handoff RelPose 41D State Layout Implementation Smoke
+
+**Type:** data | train | eval | debug
+
+**Goal**
+- 新增 handoff `handoff_joint_ee_relpose` 观测版本：三路图像 + 两臂关节/末端状态 + 右臂 TCP 相对左臂 TCP 位姿。
+- 不在 `observation.state` 中使用 `stage_id`、`active_arm_id`、`subtask_onehot`、`active_arm_onehot`、`cube_pos_w`、`yellow_area_pos_w`、`red_area_pos_w`。
+- 输出继续保持完整 `14D` 双臂 action。
+
+**Setup**
+- 代码路径：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm`
+- Raw 数据：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/raw_demos/raw_handoff_handoff_100_joint_ee_3cam_v1`
+- Smoke LeRobot 数据集：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/lerobot_datasets/lerobot_handoff_relpose_smoke`
+- Smoke 训练输出：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_relpose_smoke`
+
+**Command**
+```bash
+cd /home/ubuntu/Workspace/seven_dof_pick_place_lbm
+
+python -m py_compile \
+  isaac_pick_place/scripts/convert_handoff_raw_demos_to_lerobot.py \
+  isaac_pick_place/scripts/train_hf_mtdp_smoke.py \
+  isaac_pick_place/scripts/eval_pick_place_policy.py
+
+bash -n isaac_pick_place/scripts/train_handoff_relpose_256_mtdp.sh
+bash -n isaac_pick_place/scripts/eval_pick_place_policy.sh
+git diff --check -- \
+  isaac_pick_place/scripts/convert_handoff_raw_demos_to_lerobot.py \
+  isaac_pick_place/scripts/train_hf_mtdp_smoke.py \
+  isaac_pick_place/scripts/eval_pick_place_policy.py \
+  isaac_pick_place/scripts/train_handoff_relpose_256_mtdp.sh
+
+/home/ubuntu/Workspace/multitask_dit_policy/.venv/bin/python \
+  isaac_pick_place/scripts/convert_handoff_raw_demos_to_lerobot.py \
+  --raw-dir /home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/raw_demos/raw_handoff_handoff_100_joint_ee_3cam_v1 \
+  --output-dir /home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/lerobot_datasets/lerobot_handoff_relpose_smoke \
+  --repo-id local/seven_dof_pick_place_lbm_handoff_relpose_smoke \
+  --state-layout handoff_joint_ee_relpose \
+  --skip-failed \
+  --max-episodes 2 \
+  --require-episodes 2 \
+  --overwrite
+
+DATASET_DIR=/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/lerobot_datasets/lerobot_handoff_relpose_smoke \
+RUN_NAME=hf_mtdp_handoff_relpose_smoke \
+STEPS=2 \
+BATCH_SIZE=1 \
+GRAD_ACCUM_STEPS=1 \
+TENSORBOARD=0 \
+bash isaac_pick_place/scripts/train_handoff_relpose_256_mtdp.sh
+
+CHECKPOINT=/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_relpose_smoke/final_model \
+TASK=Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0 \
+TASK_TEXT="Right arm moves the blue cube to the yellow handoff area, then left arm moves it to the red target area." \
+RUN_NAME=eval_handoff_relpose_smoke \
+HEADLESS=1 \
+EPISODES=1 \
+MAX_STEPS=5 \
+SAVE_VIDEO=0 \
+RECORD_IMAGE_EVERY=0 \
+LOG_EVERY=1 \
+bash isaac_pick_place/scripts/eval_pick_place_policy.sh
+```
+
+**Result**
+- 静态检查通过：`py_compile`、`bash -n`、`git diff --check` 均无输出。
+- 转换 smoke 成功：2 条 episode，共 `3634` frames。
+- 新数据集 `observation.state.shape=[41]`，state names 不包含 `stage`、`active_arm`、`subtask`、`cube_pos_w`、`yellow_area_pos_w`、`red_area_pos_w`。
+- 训练 smoke 成功：`STEPS=2`，loss 从 `1.166565` 到 `0.997926`，checkpoint 写入 `final_model`。
+- Smoke checkpoint config 确认为三路图像 + `observation.state.shape=[41]` + `action.shape=[14]`。
+- 在线 eval smoke：checkpoint 权重加载成功，`missing_keys=0 unexpected_keys=0`；但当前运行环境没有可用 CUDA GPU，Isaac 建环境时报 `RuntimeError: No CUDA GPUs are available`，未完成 env step。
+
+**Interpretation**
+- 41D relpose 数据转换和训练入口已打通。
+- 在线评估代码已能识别并加载 41D checkpoint；实际闭环 step 还需在可用 CUDA/Isaac 环境下再跑一次。
+
+**Next**
+- 在 GPU 可用时重新跑 `eval_handoff_relpose_smoke`，确认 41D state 实时构造和 14D 完整动作闭环执行。
+- 若 smoke eval 通过，再用完整 relpose 数据集启动 30k 训练。
+
+### 2026-06-18 11:33 CST - Exp1 RIGHT_PLACE_YELLOW 300-Step Retreat Window 10-Episode Eval
+
+**Type:** eval | debug
+
+**Goal**
+- 沿用 300 step 右臂撤离窗口设置，将 Exp1 handoff policy 再跑 10 条 headless 评估并保存三路视频。
+- 重点观察：延长 `RIGHT_PLACE_YELLOW + ACTIVE_RIGHT` 是否能稳定让右臂自行撤离，并让左臂完成黄区到红区接力。
+
+**Setup**
+- 代码路径：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm`
+- Checkpoint：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_3cam_joint_ee_subtask_100success_bs16acc4_30k/final_model`
+- Task：`Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0`
+- 输入：三路图像 + `handoff_joint_ee_subtask` 43D state
+- `EPISODES=10`
+- `MAX_STEPS=2600`
+- `HANDOFF_RIGHT_RETREAT_STEPS=300`
+- `HANDOFF_SCRIPTED_RIGHT_RETREAT=0`
+- `HANDOFF_ACTIVE_ARM_MASK=1`
+- `RECORD_IMAGE_EVERY=5`
+
+**Command**
+```bash
+cd /home/ubuntu/Workspace/seven_dof_pick_place_lbm
+
+CHECKPOINT=/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_3cam_joint_ee_subtask_100success_bs16acc4_30k/final_model \
+TASK=Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0 \
+TASK_TEXT="First place the blue cube on the yellow middle handoff area, then place it on the red target area." \
+RUN_NAME=eval_handoff_subtask_30k_retreat300_10eps \
+HEADLESS=1 \
+EPISODES=10 \
+MAX_STEPS=2600 \
+SAVE_VIDEO=1 \
+RECORD_IMAGE_EVERY=5 \
+LOG_EVERY=100 \
+HANDOFF_RIGHT_RETREAT_STEPS=300 \
+HANDOFF_SCRIPTED_RIGHT_RETREAT=0 \
+HANDOFF_ACTIVE_ARM_MASK=1 \
+bash isaac_pick_place/scripts/eval_pick_place_policy.sh
+```
+
+**Result**
+- 输出目录：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/eval_videos/eval_handoff_subtask_30k_retreat300_10eps`
+- 总成功率：`2/10`，`success_rate=0.2`
+- `yellow_seen=5/10`
+- `red_success=2/10`
+- 结束子任务统计：
+  - `RIGHT_PLACE_YELLOW`：`7/10`
+  - `RIGHT_PICK_CUBE`：`1/10`
+  - `LEFT_PICK_FROM_YELLOW`：`1/10`
+  - `DONE_HOLD`：`1/10`
+- 每条 episode 均保存三路视频：`wrist_rgb.mp4`、`observer_wrist_rgb.mp4`、`global_rgb.mp4`。
+- EP6 虽然环境判定成功，但最终仍停在 `RIGHT_PLACE_YELLOW`，`right_retreat_elapsed=0/300`；这更像右臂直接/误打误撞把方块送到了红区，不是完整 handoff。
+- EP8 是真正完整流程成功：`RIGHT_PLACE_YELLOW -> WAIT_YELLOW_STABLE -> LEFT_PICK_FROM_YELLOW -> LEFT_PLACE_RED -> DONE_HOLD`，`right_retreat_elapsed=300/300`。
+- EP9 完成右臂黄区放置和 300 step 撤离，但左臂在 `LEFT_PICK_FROM_YELLOW` 阶段把方块拨离黄区，未能抓起。
+- EP10 曾达到 `right_retreat_elapsed=220/300`，随后方块被右臂继续带离黄区并抬高，计数归零，最终仍卡在 `RIGHT_PLACE_YELLOW`。
+
+**Interpretation**
+- 300 step 右臂撤离窗口确实可以让少数样本完成完整 handoff，但整体不稳定。
+- 主要失败仍发生在右臂阶段：右臂经常在 `RIGHT_PLACE_YELLOW` 条件下继续夹/推/带动方块，导致黄区稳定计数无法累计到 300。
+- 新出现的次要失败是左臂黄区抓取不稳：即使右臂完成撤离，左臂也可能把方块拨离黄区。
+- 当前结果继续支持前一条结论：单纯延长 `RIGHT_PLACE_YELLOW` 窗口不是可靠修法，下一版应把 `RIGHT_RETREAT` 显式建成子任务/状态，或对右臂释放后的动作监督做更明确的阶段拆分。
+
+**Next**
+- 回看 EP8 成功视频，对比 EP9/EP10 的黄区释放和左臂抓取细节。
+- 下一版数据/训练优先加入显式 `RIGHT_RETREAT` 子任务，而不是继续增加等待窗口。
+
+### 2026-06-18 11:03 CST - Exp1 RIGHT_PLACE_YELLOW 300-Step Retreat Window Eval
+
+**Type:** eval | debug
+
+**Goal**
+- 将在线 scheduler 的右臂撤离窗口从 `60` step 改为 `300` step。
+- 不使用脚本右臂撤离，保留 active-arm action mask，测试模型在更长 `RIGHT_PLACE_YELLOW + ACTIVE_RIGHT` 条件下是否能自行完成右臂撤离并让左臂接力。
+
+**Setup**
+- 代码路径：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm`
+- Checkpoint：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_3cam_joint_ee_subtask_100success_bs16acc4_30k/final_model`
+- Task：`Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0`
+- 输入：三路图像 + `handoff_joint_ee_subtask` 43D state
+- `HANDOFF_RIGHT_RETREAT_STEPS=300`
+- `HANDOFF_SCRIPTED_RIGHT_RETREAT=0`
+- `HANDOFF_ACTIVE_ARM_MASK=1`
+
+**Command**
+```bash
+cd /home/ubuntu/Workspace/seven_dof_pick_place_lbm
+
+CHECKPOINT=/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_3cam_joint_ee_subtask_100success_bs16acc4_30k/final_model \
+TASK=Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0 \
+TASK_TEXT="First place the blue cube on the yellow middle handoff area, then place it on the red target area." \
+RUN_NAME=eval_handoff_subtask_30k_retreat300_3eps \
+HEADLESS=1 \
+EPISODES=3 \
+MAX_STEPS=2600 \
+SAVE_VIDEO=1 \
+RECORD_IMAGE_EVERY=5 \
+LOG_EVERY=100 \
+HANDOFF_RIGHT_RETREAT_STEPS=300 \
+HANDOFF_SCRIPTED_RIGHT_RETREAT=0 \
+HANDOFF_ACTIVE_ARM_MASK=1 \
+bash isaac_pick_place/scripts/eval_pick_place_policy.sh
+```
+
+**Result**
+- 输出目录：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/eval_videos/eval_handoff_subtask_30k_retreat300_3eps`
+- 成功率：`1/3`
+- 每条均保存三路视频：`wrist_rgb.mp4`、`observer_wrist_rgb.mp4`、`global_rgb.mp4`
+- EP1：`yellow_seen=True`，但最终仍卡在 `RIGHT_PLACE_YELLOW`，`right_retreat_elapsed=0/300`；方块被右臂带/推离黄区，最终约 `(0.576, 0.315, 0.024)`。
+- EP2：成功，`right_retreat_elapsed=300/300`，`LEFT_PICK_FROM_YELLOW -> LEFT_PLACE_RED` at step 1327，`LEFT_PLACE_RED -> DONE_HOLD` at step 1596。
+- EP3：`yellow_seen=True`，但最终仍卡在 `RIGHT_PLACE_YELLOW`，`right_retreat_elapsed=0/300`；方块被右臂带/推离黄区，最终约 `(0.601, 0.313, 0.038)`。
+
+**Interpretation**
+- 300 step 撤离窗口可以在某些初始点上成功让右臂保持黄区稳定足够久，并切到左臂完成任务。
+- 但该策略不稳定：EP1/EP3 中右臂在 `RIGHT_PLACE_YELLOW` 下继续拖动方块，导致黄区稳定计数无法累计到 300，最终一直不切左臂。
+- 说明单纯延长粗子任务窗口不是可靠修法；`right_retreat` 仍应作为明确子任务/阶段建模，或使用更明确的撤离控制逻辑。
+
+**Next**
+- 回看 EP2 成功视频和 EP1/EP3 失败视频，对比右臂放黄后的末端高度和是否持续接触方块。
+- 下一版优先拆出 `RIGHT_RETREAT` 子任务，而不是继续增大 `RIGHT_PLACE_YELLOW` 等待窗口。
+
+### 2026-06-18 10:50 CST - Exp1 No Active-Arm Action Mask Eval
+
+**Type:** eval | debug
+
+**Goal**
+- 关闭在线评估中的 active-arm action mask，让模型输出的 14D 双臂动作完整进入环境。
+- 不使用脚本右臂撤离，测试模型是否可以自行让右臂撤离并完成 handoff。
+
+**Setup**
+- 代码路径：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm`
+- Checkpoint：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_3cam_joint_ee_subtask_100success_bs16acc4_30k/final_model`
+- Task：`Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0`
+- 输入：三路图像 + `handoff_joint_ee_subtask` 43D state
+- 改动：
+  - `eval_pick_place_policy.py` 增加 `--disable-handoff-active-arm-mask`
+  - `eval_pick_place_policy.sh` 增加 `HANDOFF_ACTIVE_ARM_MASK=0`
+- 注意：active-arm onehot 仍保留在 state 中，因为 checkpoint 输入维度固定为 43D；本次只关闭 action mask。
+- 脚本右臂撤离：关闭，`HANDOFF_SCRIPTED_RIGHT_RETREAT=0`
+
+**Command**
+```bash
+cd /home/ubuntu/Workspace/seven_dof_pick_place_lbm
+
+CHECKPOINT=/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_3cam_joint_ee_subtask_100success_bs16acc4_30k/final_model \
+TASK=Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0 \
+TASK_TEXT="First place the blue cube on the yellow middle handoff area, then place it on the red target area." \
+RUN_NAME=eval_handoff_subtask_30k_no_active_mask_2eps \
+HEADLESS=1 \
+EPISODES=2 \
+MAX_STEPS=2600 \
+SAVE_VIDEO=1 \
+RECORD_IMAGE_EVERY=5 \
+LOG_EVERY=100 \
+HANDOFF_ACTIVE_ARM_MASK=0 \
+HANDOFF_SCRIPTED_RIGHT_RETREAT=0 \
+HANDOFF_RIGHT_RETREAT_STEPS=60 \
+bash isaac_pick_place/scripts/eval_pick_place_policy.sh
+```
+
+**Result**
+- 输出目录：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/eval_videos/eval_handoff_subtask_30k_no_active_mask_2eps`
+- 成功率：`0/2`
+- `yellow_seen=True`：`0/2`
+- 两条均最终卡在 `RIGHT_PICK_CUBE`，没有进入 `RIGHT_PLACE_YELLOW`。
+- EP1 最终方块约在 `(0.592, -0.225, 0.017)`，未抓起。
+- EP2 最终方块约在 `(0.537, -0.240, 0.017)`，未抓起。
+- 每条均保存三路视频：`wrist_rgb.mp4`、`observer_wrist_rgb.mp4`、`global_rgb.mp4`。
+
+**Interpretation**
+- 关闭 active-arm action mask 后表现更差，两个 episode 都失败在右臂抓取阶段，无法测试后续“右臂是否自行撤离”。
+- 这说明 action mask 在当前模型上不是单纯限制能力，反而可能在早期阶段抑制了另一只手/无关 action 的干扰。
+- 仅靠关闭 active-arm mask 不能解决右臂撤离问题；更可信的方向仍是把 `right_retreat` 单独建模为明确子任务，或使用更细粒度阶段条件。
+
+**Next**
+- 回看 `global_rgb.mp4`，确认关闭 mask 后左臂或右臂多余动作如何干扰右抓。
+- 下一版训练/转换优先考虑把 `right_retreat` 从 `RIGHT_PLACE_YELLOW` 中拆出来。
+
+### 2026-06-18 10:36 CST - Exp1 Scripted Right Retreat Oracle Check
+
+**Type:** eval | debug
+
+**Goal**
+- 验证用户在视频中观察到的失败原因：右臂放置后没有抬起撤离，挡住左臂接力抓取。
+- 使用调试开关 `HANDOFF_SCRIPTED_RIGHT_RETREAT=1`，在黄区释放后脚本化控制右臂抬高撤离，再把控制权切给左臂。
+
+**Setup**
+- 代码路径：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm`
+- Checkpoint：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_3cam_joint_ee_subtask_100success_bs16acc4_30k/final_model`
+- Task：`Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0`
+- 输入：三路图像 + `handoff_joint_ee_subtask` 43D state
+- 调试干预：`HANDOFF_SCRIPTED_RIGHT_RETREAT=1`
+- 右臂撤离上限：`HANDOFF_RIGHT_RETREAT_STEPS=120`
+- 注意：该运行不是纯策略评估，右臂撤离阶段由脚本覆盖右臂 action。
+
+**Command**
+```bash
+cd /home/ubuntu/Workspace/seven_dof_pick_place_lbm
+
+CHECKPOINT=/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_3cam_joint_ee_subtask_100success_bs16acc4_30k/final_model \
+TASK=Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0 \
+TASK_TEXT="First place the blue cube on the yellow middle handoff area, then place it on the red target area." \
+RUN_NAME=eval_handoff_subtask_30k_scripted_right_retreat_ep1 \
+HEADLESS=1 \
+EPISODES=1 \
+MAX_STEPS=2600 \
+SAVE_VIDEO=1 \
+RECORD_IMAGE_EVERY=5 \
+LOG_EVERY=100 \
+HANDOFF_RIGHT_RETREAT_STEPS=120 \
+HANDOFF_SCRIPTED_RIGHT_RETREAT=1 \
+bash isaac_pick_place/scripts/eval_pick_place_policy.sh
+```
+
+**Result**
+- 输出目录：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/eval_videos/eval_handoff_subtask_30k_scripted_right_retreat_ep1`
+- 三路视频：
+  - `episode_000000/wrist_rgb.mp4`
+  - `episode_000000/observer_wrist_rgb.mp4`
+  - `episode_000000/global_rgb.mp4`
+- 成功率：`1/1`
+- 最终阶段：`DONE_HOLD`
+- `yellow_seen=True`
+- `red_success=True`
+- `right_retreat_elapsed=120/120`
+- 阶段关键点：
+  - `RIGHT_PICK_CUBE -> RIGHT_PLACE_YELLOW` at step 381
+  - `RIGHT_PLACE_YELLOW -> WAIT_YELLOW_STABLE` at step 872
+  - `WAIT_YELLOW_STABLE -> LEFT_PICK_FROM_YELLOW` at step 892
+  - `LEFT_PICK_FROM_YELLOW -> LEFT_PLACE_RED` at step 1851
+  - `LEFT_PLACE_RED -> DONE_HOLD` at step 2144
+
+**Interpretation**
+- 用户观察成立：纯策略失败的关键原因之一是右臂放黄后没有抬起撤离，阻挡左臂。
+- 在仅脚本化右臂撤离的情况下，同一个 30k Exp1 模型可以完成左臂接力抓取和放红区，说明左臂策略并非完全不会，主要被右臂低位遮挡/碰撞破坏。
+- 当前粗子任务设计把 `right_release_on_yellow` 和 `right_retreat` 都压在 `RIGHT_PLACE_YELLOW` 中，模型没有可靠学出“释放后抬起撤离”的时序。后续更干净的方案是把 `RIGHT_RETREAT` 独立成子任务类别，重新转换并训练；短期可用脚本化撤离做 oracle/debug。
+
+**Next**
+- 回看 `global_rgb.mp4` 对比纯策略和脚本撤离版本，确认右臂抬起后左臂路径恢复。
+- 下一版训练建议把 `right_retreat` 单独作为子任务，或在 state/task condition 中显式加入 release/retreat 阶段，避免粗子任务内部多模态动作混淆。
+
+### 2026-06-18 10:30 CST - Exp1 Eval Scheduler Right Retreat Window Test
+
+**Type:** eval | debug
+
+**Goal**
+- 修复在线推理 scheduler 在黄色区稳定后过早切到左臂，导致右臂冻结在放置姿态的问题。
+- 快速测试 `RIGHT_PLACE_YELLOW` 额外保持一段右臂撤离窗口后，左臂接力是否改善。
+
+**Setup**
+- 代码路径：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm`
+- Checkpoint：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_3cam_joint_ee_subtask_100success_bs16acc4_30k/final_model`
+- Task：`Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0`
+- 改动：
+  - `eval_pick_place_policy.py` 增加 `--handoff-right-retreat-steps`
+  - `eval_pick_place_policy.sh` 增加 `HANDOFF_RIGHT_RETREAT_STEPS`
+  - 在线 scheduler 在检测到黄色区释放后继续保持 `RIGHT_PLACE_YELLOW + ACTIVE_RIGHT`，默认可调；本次有效测试使用 `60` step。
+
+**Command**
+```bash
+cd /home/ubuntu/Workspace/seven_dof_pick_place_lbm
+
+CHECKPOINT=/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_3cam_joint_ee_subtask_100success_bs16acc4_30k/final_model \
+TASK=Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0 \
+TASK_TEXT="First place the blue cube on the yellow middle handoff area, then place it on the red target area." \
+RUN_NAME=eval_handoff_subtask_30k_retreat60_ep1 \
+HEADLESS=1 \
+EPISODES=1 \
+MAX_STEPS=2600 \
+SAVE_VIDEO=1 \
+RECORD_IMAGE_EVERY=5 \
+LOG_EVERY=100 \
+HANDOFF_RIGHT_RETREAT_STEPS=60 \
+bash isaac_pick_place/scripts/eval_pick_place_policy.sh
+```
+
+**Result**
+- 输出目录：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/eval_videos/eval_handoff_subtask_30k_retreat60_ep1`
+- 三路视频已生成：
+  - `episode_000000/wrist_rgb.mp4`
+  - `episode_000000/observer_wrist_rgb.mp4`
+  - `episode_000000/global_rgb.mp4`
+- 成功率：`0/1`
+- `yellow_seen=True`
+- `red_success=False`
+- `right_retreat_elapsed=60/60`
+- 阶段切换：
+  - `RIGHT_PICK_CUBE -> RIGHT_PLACE_YELLOW` at step 309
+  - `RIGHT_PLACE_YELLOW -> WAIT_YELLOW_STABLE` at step 745
+  - `WAIT_YELLOW_STABLE -> LEFT_PICK_FROM_YELLOW` at step 765
+- 方块在 step 800 仍在黄色区附近：约 `(0.530, 0.019, 0.017)`。
+- 左臂阶段未抓起方块，反而逐步把方块推到约 `(0.645, -0.172, 0.017)`。
+
+**Interpretation**
+- 原先“右臂刚放完就被冻结”的 scheduler 问题已被修正：本次在线推理确实让 `RIGHT_PLACE_YELLOW` 多跑了 60 step，右臂撤离窗口生效。
+- 但完整任务仍失败，说明“右臂遮挡”不是唯一瓶颈；当前左臂接力抓取本身仍不稳，可能存在左臂接近方向、黄色区抓取姿态或训练分布不足的问题。
+- `HANDOFF_RIGHT_RETREAT_STEPS=200` 曾短暂试跑，但窗口太长，右臂继续在 `RIGHT_PLACE_YELLOW` 下会把方块推出黄区，因此中止，未作为正式评估结果。
+
+**Next**
+- 回看 `eval_handoff_subtask_30k_retreat60_ep1/episode_000000/global_rgb.mp4`，重点确认右臂撤离距离和左臂夹取时的碰撞/对准情况。
+- 后续可能需要单独强化左臂从黄色区抓取，或把 `right_retreat` 单独作为子任务类别重新转换/训练。
+
+### 2026-06-18 10:08 CST - Exp1 Subtask Handoff 30k Headless Eval
+
+**Type:** eval
+
+**Goal**
+- 测试 Exp1 子任务条件输入模型 30k `final_model` 在双 Franka handoff 任务上的在线推理表现。
+- 重点观察 `subtask_onehot + active_arm_onehot` 是否改善左右臂时序和第一阶段黄色中转放置。
+
+**Setup**
+- 代码路径：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm`
+- Checkpoint：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_3cam_joint_ee_subtask_100success_bs16acc4_30k/final_model`
+- Task：`Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0`
+- Task text：`First place the blue cube on the yellow middle handoff area, then place it on the red target area.`
+- 输入：三路图像 + `handoff_joint_ee_subtask` 43D state
+- 动作：14D 双臂动作，`n_action_steps=8`
+- Seed：`2000`
+- Device：`cuda:0`
+- Episodes：`5`
+- Max steps：`2600`
+
+**Command**
+```bash
+cd /home/ubuntu/Workspace/seven_dof_pick_place_lbm
+
+CHECKPOINT=/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_3cam_joint_ee_subtask_100success_bs16acc4_30k/final_model \
+TASK=Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0 \
+TASK_TEXT="First place the blue cube on the yellow middle handoff area, then place it on the red target area." \
+RUN_NAME=eval_handoff_subtask_30k_5eps_headless_video_retry \
+EPISODES=5 \
+MAX_STEPS=2600 \
+HEADLESS=1 \
+SAVE_VIDEO=1 \
+RECORD_IMAGE_EVERY=5 \
+LOG_EVERY=100 \
+bash isaac_pick_place/scripts/eval_pick_place_policy.sh
+```
+
+**Result**
+- 输出目录：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/eval_videos/eval_handoff_subtask_30k_5eps_headless_video_retry`
+- 总成功率：`0/5`
+- `yellow_seen=True`：`3/5`
+- `yellow_success=True`：`2/5`
+- `red_success=True`：`0/5`
+- 每个 episode 均保存三路视频：`wrist_rgb.mp4`、`observer_wrist_rgb.mp4`、`global_rgb.mp4`
+- 分 episode 结果：
+  - EP1：到过黄色区，最终卡在 `LEFT_PICK_FROM_YELLOW`，左臂抓取失败并把方块推偏到约 `(0.523, -0.085, 0.017)`。
+  - EP2：右臂抓起后放置过冲，最终卡在 `RIGHT_PLACE_YELLOW`，没有黄色稳定。
+  - EP3：黄色放置成功，最终卡在 `LEFT_PICK_FROM_YELLOW`，方块稳定在黄色区附近但左臂未抓起。
+  - EP4：初始点偏右下，右臂抓取失败，最终卡在 `RIGHT_PICK_CUBE`。
+  - EP5：黄色放置成功，最终卡在 `LEFT_PICK_FROM_YELLOW`，左臂未抓起。
+
+**Interpretation**
+- 相比未加子任务条件的 30k 模型，Exp1 明显改善了阶段顺序：右臂先执行、到黄后才切左臂，未再出现左臂一开始乱动到黄色区的主要问题。
+- 当前主要瓶颈已经转移到左臂接力抓取：即使方块准确稳定地放在黄色区，左臂也常常无法形成有效抓取。
+- 右臂也仍有边界泛化问题：部分初始点会在抓取或放黄阶段失败，但整体第一阶段已能成功触发。
+
+**Next**
+- 优先回看 EP3/EP5 的 `global_rgb.mp4` 和 `wrist_rgb.mp4`，确认左臂在黄色区抓取失败时的末端位置、夹爪闭合和视野遮挡。
+- 下一轮可考虑：单独强化左臂从黄色区到红区的数据比例，或先做阶段化训练/评估，把右臂到黄和左臂到红拆开定位。
+
+### 2026-06-17 16:41 CST - Handoff Exp 1 子任务条件输入实现与数据集转换
+
+**Type:** data | train-smoke | eval-smoke | debug
+
+**Goal**
+- 针对 30k handoff baseline 仍然失败的问题，验证“粗粒度子任务 + 激活机械臂”条件输入是否可以降低双臂阶段歧义。
+- 只做 Exp 1：模型输入增加 `subtask_onehot(6)` 和 `active_arm_onehot(3)`，不加入 cube/yellow/red oracle position。
+
+**Setup**
+- 代码路径：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm`
+- Baseline checkpoint：
+  - `/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_3cam_joint_ee_resume_from_14569_to_30k_bs16acc4/final_model`
+- Baseline eval 输出：
+  - `/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/eval_videos/eval_handoff_30k_resume_headless_video`
+- Raw handoff 数据：
+  - `/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/raw_demos/raw_handoff_handoff_100_joint_ee_3cam_v1`
+- 新 LeRobot 数据集：
+  - `/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/lerobot_datasets/lerobot_handoff_handoff_100_joint_ee_3cam_v1_subtask`
+- 任务：`Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0`
+- 相机：`wrist_rgb`、`observer_wrist_rgb`、`global_rgb`
+- 动作：14D dual-arm action，保持不变
+
+**Command**
+```bash
+# 30k baseline headless 视频评估
+cd /home/ubuntu/Workspace/seven_dof_pick_place_lbm
+
+CHECKPOINT=/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/hf_mtdp_handoff_3cam_joint_ee_resume_from_14569_to_30k_bs16acc4/final_model \
+TASK=Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0 \
+TASK_TEXT="First place the blue cube on the yellow middle handoff area, then place it on the red target area." \
+RUN_NAME=eval_handoff_30k_resume_headless_video \
+EPISODES=10 \
+MAX_STEPS=2600 \
+HEADLESS=1 \
+SAVE_VIDEO=1 \
+RECORD_IMAGE_EVERY=5 \
+LOG_EVERY=100 \
+bash isaac_pick_place/scripts/eval_pick_place_policy.sh
+
+# 重新转换 handoff 数据集，加入 coarse subtask 和 active arm 条件
+/home/ubuntu/Workspace/multitask_dit_policy/.venv/bin/python \
+  isaac_pick_place/scripts/convert_handoff_raw_demos_to_lerobot.py \
+  --raw-dir /home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/raw_demos/raw_handoff_handoff_100_joint_ee_3cam_v1 \
+  --output-dir /home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/lerobot_datasets/lerobot_handoff_handoff_100_joint_ee_3cam_v1_subtask \
+  --repo-id local/seven_dof_pick_place_lbm_handoff_handoff_100_joint_ee_3cam_v1_subtask \
+  --overwrite
+
+# 43D subtask state 训练 smoke
+DATASET_DIR=/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/lerobot_datasets/lerobot_handoff_subtask_convert_smoke \
+RUN_NAME=handoff_subtask_train_smoke \
+STATE_MODE=handoff_joint_ee_subtask \
+STEPS=2 \
+SAVE_FREQ=0 \
+BATCH_SIZE=1 \
+GRAD_ACCUM_STEPS=1 \
+TENSORBOARD=0 \
+NUM_WORKERS=0 \
+bash isaac_pick_place/scripts/train_handoff_256_mtdp.sh
+
+# 43D subtask checkpoint Isaac eval smoke
+CHECKPOINT=/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/training_runs/handoff_subtask_train_smoke/final_model \
+TASK=Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0 \
+TASK_TEXT="First place the blue cube on the yellow middle handoff area, then place it on the red target area." \
+RUN_NAME=eval_handoff_subtask_smoke_10steps \
+EPISODES=1 \
+MAX_STEPS=10 \
+HEADLESS=1 \
+SAVE_VIDEO=0 \
+RECORD_IMAGE_EVERY=0 \
+LOG_EVERY=5 \
+bash isaac_pick_place/scripts/eval_pick_place_policy.sh
+```
+
+**Result**
+- 30k baseline 评估手动跑完前 3 个完整 episode 后中断剩余重复失败样本：
+  - `final_success=0/3`
+  - `yellow_seen=0/3`
+  - `red_success=0/3`
+  - 每个完整 episode 跑满 `2600` steps
+  - 三路视频已保存到 `eval_handoff_30k_resume_headless_video/episode_000000..000002`
+- 失败模式：
+  - 第 1 轮右臂只轻微推动方块，未抓起。
+  - 第 2、3 轮右臂把方块向远离任务区方向推走，后半段有时带起方块，但已偏离黄色区域。
+  - 左臂阶段基本还没有进入有效评估，主要瓶颈仍在右臂第一阶段。
+- 已实现 Exp 1 数据和推理改造：
+  - 从 raw `phase` 映射 6 个 coarse subtask：
+    - `RIGHT_PICK_CUBE`
+    - `RIGHT_PLACE_YELLOW`
+    - `WAIT_YELLOW_STABLE`
+    - `LEFT_PICK_FROM_YELLOW`
+    - `LEFT_PLACE_RED`
+    - `DONE_HOLD`
+  - active arm 编码：
+    - `ACTIVE_LEFT`
+    - `ACTIVE_RIGHT`
+    - `ACTIVE_NONE`
+  - converter 保留原 45D full state 前缀，并在末尾追加：
+    - `subtask_onehot(6)`
+    - `active_arm_onehot(3)`
+  - 新 LeRobot full state 为 `54D`。
+  - 训练 Exp 1 实际使用 `43D`：
+    - 前 `34D` 左右臂关节/TCP/夹爪状态
+    - 末尾 `9D` 子任务和激活机械臂 one-hot
+  - eval 对 `43D` checkpoint 自动启用 oracle coarse scheduler、inactive arm mask、subtask change 时 `policy.reset()`。
+- 新数据集转换检查：
+  - episodes：`100`
+  - total frames：`184675`
+  - `observation.state`：`54D`
+  - action：`14D`
+  - 三路图像 feature 均存在
+  - `meta/subtasks.parquet` 存在
+  - 抽查首帧/中间帧/末帧：
+    - `subtask_onehot.sum() = 1.0`
+    - `active_arm_onehot.sum() = 1.0`
+- 训练 smoke：
+  - `STATE_MODE=handoff_joint_ee_subtask` 跑通，checkpoint config 中 `observation.state.shape=[43]`
+  - 旧 `STATE_MODE=handoff_joint_ee` 兼容 smoke 跑通，checkpoint config 中 `observation.state.shape=[34]`
+- eval smoke：
+  - 43D smoke checkpoint 在 Isaac headless 中跑通 10 steps
+  - 日志中确认 scheduler 输出：
+```text
+subtask=RIGHT_PICK_CUBE active_arm=ACTIVE_RIGHT
+```
+
+**Checks**
+```bash
+python -m py_compile \
+  isaac_pick_place/scripts/convert_handoff_raw_demos_to_lerobot.py \
+  isaac_pick_place/scripts/train_hf_mtdp_smoke.py \
+  isaac_pick_place/scripts/eval_pick_place_policy.py
+
+bash -n isaac_pick_place/scripts/train_handoff_256_mtdp.sh
+bash -n isaac_pick_place/scripts/eval_pick_place_policy.sh
+git diff --check
+```
+
+**Interpretation**
+- 当前 30k baseline 的失败不只是训练步数不足，至少明显存在阶段/手臂条件不清晰的问题。
+- 固定 global language 对每帧来说几乎是 constant task label，不能告诉 policy 当前该右臂抓、右臂放黄区、等待、左臂抓还是左臂放红区。
+- Exp 1 将 hidden FSM 压缩成少量 semantic subtask，并显式告诉 policy active arm；这应该优先改善：
+  - 左臂提前动作
+  - 左夹爪开局夹空气
+  - 左右臂 action 混合
+  - action chunk 跨阶段残留
+- 如果 Exp 1 仍然右臂抓不稳，下一步再转向 grasp 控制、action scale、gripper command convention、相机和数据质量排查。
+
+**Next**
+- 用新数据集正式训练 Exp 1：
+```bash
+cd /home/ubuntu/Workspace/seven_dof_pick_place_lbm
+
+DATASET_DIR=/home/ubuntu/Workspace/seven_dof_pick_place_lbm/experiments/lerobot_datasets/lerobot_handoff_handoff_100_joint_ee_3cam_v1_subtask \
+RUN_NAME=hf_mtdp_handoff_3cam_joint_ee_subtask_100success_bs16acc4_30k \
+STATE_MODE=handoff_joint_ee_subtask \
+BATCH_SIZE=16 \
+GRAD_ACCUM_STEPS=4 \
+STEPS=30000 \
+bash isaac_pick_place/scripts/train_handoff_256_mtdp.sh
+```
+- 训练完成后跑 10 episode headless 视频评估，优先比较 `yellow_seen` 是否从 0 提升。
+
+### 2026-06-15 16:36 CST - 双臂 Handoff raw demo 采集脚本
+
+**Type:** env | data | scripted-expert
+
+**Goal**
+- 为黄色中转区 handoff 任务新增独立 raw demo 采集流程。
+- 右侧 `observer_robot` 先把 cube 放到黄色区域，左侧 `robot` 再把 cube 放到红色区域。
+
+**Result**
+- handoff task action space 扩为双臂末端增量控制：
+  - `action[0:6]`：左侧/actor `robot` 末端 6D delta pose
+  - `action[6]`：左侧/actor `robot` gripper
+  - `action[7:13]`：右侧/observer `observer_robot` 末端 6D delta pose
+  - `action[13]`：右侧/observer `observer_robot` gripper
+- 新增 `isaac_pick_place/scripts/scripted_handoff_collect.py`：
+  - 顺序执行 `right_to_yellow -> left_to_red`
+  - 同时只移动一只手，另一只手 action 保持 0
+  - raw demo 每步记录 `stage`、`phase`、`active_arm`、14 维 action、左右手 7 维 action slice、cube/area world pose、yellow/red stage success 和三路图像路径
+- 新增 `isaac_pick_place/scripts/collect_handoff_demos.sh`：
+  - 默认只采 raw demo，不转换 LeRobot
+  - 默认输出 `experiments/raw_demos/raw_handoff_<RUN_NAME>`
+
+**Notes**
+- Franka 本体仍是 7 自由度；这里每只手 action 的 `6+1` 是任务空间控制：6D 末端相对位姿增量经 Differential IK 映射到 7 个关节，再加 1D 夹爪。
+- 修正右臂撤离逻辑：`right_retreat` 不再停在黄色区正上方，而是回到 episode reset 后记录的右臂 park TCP，避免左臂从黄色区抓取时撞到右臂。
+- 修正左臂收尾逻辑：红区稳定达标后不立即结束 episode，而是继续执行 `left_retreat` 回到左臂 park TCP；retreat 阶段不能靠 timeout 跳过，最终 `success=True` 要求红区仍稳定且左臂已回 park；`summary.json` 额外记录 `red_stage_success`。
+- handoff 环境关闭继承自旧单臂任务的内置 `terminations.success`，避免红区刚稳定就被 Isaac 自动 reset，导致左臂撤回动作被截断。
+
+**Checks**
+```bash
+python -m py_compile \
+  isaac_pick_place/tasks/cube_pick_place/handoff_env_cfg.py \
+  isaac_pick_place/scripts/scripted_handoff_collect.py
+
+bash -n isaac_pick_place/scripts/collect_handoff_demos.sh
+git diff --check
+```
+
+### 2026-06-15 16:08 CST - 双臂黄色中转区环境草稿
+
+**Type:** env | task-design
+
+**Goal**
+- 基于当前三相机双 Franka 场景，搭一个更像双臂协作的几何布局：
+  - 右侧/observer arm 前方生成蓝色方块；
+  - 两臂中间放黄色中转区域；
+  - 左侧/actor arm 前方保留红色最终目标区域。
+
+**Setup**
+- 新 task id：`Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0`
+- 新环境配置：`isaac_pick_place/tasks/cube_pick_place/handoff_env_cfg.py`
+- 继承：`CubePickPlaceRedTargetFrankaIKRelVisuomotorEnvCfg`
+- world-frame 关键位置：
+  - `cube_init_center_world_xy=(0.50, -0.30)`
+  - `yellow_area_center_world_xy=(0.50, 0.00)`
+  - `red_area_center_world_xy=(0.50, 0.30)`
+
+**Result**
+- 新增视觉黄色区域 `YellowHandoffArea`，大小 `0.12m x 0.12m`，无碰撞。
+- 红色区域继续作为最终目标，位置固定到 world `(0.50, 0.30)`。
+- 方块 reset 改为以 `observer_robot` 为参考，在其前方 world `(0.50, -0.30)` 附近随机，默认半径 `0.0-0.10m`。
+- 当前只先搭场景和 reset 分布；右臂控制、双阶段奖励/终止、交接专家脚本尚未实现。
+
+**Checks**
+- `python -m py_compile isaac_pick_place/tasks/cube_pick_place/handoff_env_cfg.py isaac_pick_place/tasks/cube_pick_place/__init__.py`
+- `git diff --check`
+
+### 2026-06-15 15:21 CST - 三相机正式化代码改造
+
+**Type:** env | data | train | eval | debug
+
+**Goal**
+- 将现有 `wrist_cam` 与 `observer_wrist_cam` 正式定义为两台机械臂各自的腕部相机。
+- 新增真正的固定全局相机 `global_cam`，并让第三路图像进入后续数据集和模型输入。
+
+**Setup**
+- 代码路径：`/home/ubuntu/Workspace/seven_dof_pick_place_lbm`
+- 任务：`Isaac-Cube-Pick-Place-Red-Target-Franka-IK-Rel-Visuomotor-v0`
+- 关键文件：
+  - `isaac_pick_place/tasks/cube_pick_place/env_cfg.py`
+  - `isaac_pick_place/scripts/scripted_pick_place.py`
+  - `isaac_pick_place/scripts/convert_raw_demos_to_lerobot.py`
+  - `isaac_pick_place/scripts/train_hf_mtdp_smoke.py`
+  - `isaac_pick_place/scripts/eval_pick_place_policy.py`
+
+**Result**
+- `observer_robot` 默认关节姿态已与主 `robot` 对齐。
+- `observer_wrist_cam` 已改为与 `wrist_cam` 相同的手腕 local offset 和相机内参。
+- 新增 `global_cam`：
+  - `pos=(0.20, 0.00, 1.00)`
+  - `rot=(0.69527, 0.12886, -0.12886, -0.69527)`，来自 Isaac UI 的 WXYZ 四元数
+  - `convention="opengl"`，保证代码中的四元数和 IsaacSim Transform 面板中的 `Orient` 保持一致
+  - `focal_length=14.0`
+  - `clipping_range=(0.05, 3.0)`
+- policy observation 新增 `global_rgb`。
+- raw demo、LeRobot 转换、训练、评估均支持三路图像：
+  - `observation.images.wrist_rgb`
+  - `observation.images.observer_wrist_rgb`
+  - `observation.images.global_rgb`
+- 训练脚本新增 `--image-keys`，wrapper 对应 `IMAGE_KEYS`，默认 `auto`：
+  - 旧两路数据集自动使用两路；
+  - 新三路数据集自动使用三路。
+
+**Checks**
+```bash
+python -m py_compile \
+  isaac_pick_place/tasks/cube_pick_place/env_cfg.py \
+  isaac_pick_place/scripts/scripted_pick_place.py \
+  isaac_pick_place/scripts/smoke_lift_env.py \
+  isaac_pick_place/scripts/eval_pick_place_policy.py \
+  isaac_pick_place/scripts/convert_raw_demos_to_lerobot.py \
+  isaac_pick_place/scripts/train_hf_mtdp_smoke.py
+
+bash -n isaac_pick_place/scripts/train_random_cube_256_mtdp.sh
+bash -n isaac_pick_place/scripts/collect_random_demos_to_lerobot.sh
+bash -n isaac_pick_place/scripts/eval_pick_place_policy.sh
+```
+- 以上静态检查通过。
+- 用临时 raw demo 片段验证转换逻辑：
+  - 两路 raw demo 保持输出两路 image features。
+  - 三路 raw demo 输出 `wrist_rgb + observer_wrist_rgb + global_rgb`。
+- 用训练 venv 验证 `IMAGE_KEYS=auto`：
+  - 旧两路 dataset metadata 解析为两路；
+  - 新三路 dataset metadata 解析为三路。
+
+**Blocked Runtime Check**
+- 尝试运行 Isaac headless 相机 smoke 时，当前 Codex 执行环境无法看到 CUDA/NVIDIA driver：
+  - `NVML_ERROR_DRIVER_NOT_LOADED`
+  - `RuntimeError: No CUDA GPUs are available`
+- 因此三路相机的实际画面质量仍需在正常服务器终端里运行 smoke 命令确认。
+
+**Next**
+- 在正常终端运行三路相机 smoke，检查 `global_rgb` 是否同时覆盖两台机械臂、蓝色方块和红色目标区域。
+- 确认视角后再重新采集三路数据集并训练三路图像模型。
+
 ### 2026-06-12 10:05 CST - front_back_1 全状态模型随机闭环评估
 
 **Type:** eval | train

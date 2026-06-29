@@ -35,6 +35,13 @@ def _parse_float_pair_env(name: str, default: tuple[float, float]) -> tuple[floa
     return float(parts[0]), float(parts[1])
 
 
+def _parse_float_env(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if not value:
+        return default
+    return float(value)
+
+
 def _cube_radius_range_from_env() -> tuple[float, float]:
     return _parse_float_pair_env("CUBE_RADIUS_RANGE", (0.12, 0.22))
 
@@ -44,6 +51,14 @@ def _cube_angle_range_from_env() -> tuple[float, float]:
     if radians:
         return _parse_float_pair_env("CUBE_ANGLE_RANGE_RAD", (-2.61799387799, -0.52359877559))
     degrees = _parse_float_pair_env("CUBE_ANGLE_RANGE_DEG", (-150.0, -30.0))
+    return math.radians(degrees[0]), math.radians(degrees[1])
+
+
+def _cube_yaw_range_from_env(default: tuple[float, float] = (0.0, 0.0)) -> tuple[float, float]:
+    radians = os.environ.get("CUBE_YAW_RANGE_RAD")
+    if radians:
+        return _parse_float_pair_env("CUBE_YAW_RANGE_RAD", default)
+    degrees = _parse_float_pair_env("CUBE_YAW_RANGE_DEG", (math.degrees(default[0]), math.degrees(default[1])))
     return math.radians(degrees[0]), math.radians(degrees[1])
 
 
@@ -80,6 +95,10 @@ class PickPlaceObservationsCfg(LiftObservationsCfg):
             func=base_mdp.image,
             params={"sensor_cfg": SceneEntityCfg("observer_wrist_cam"), "data_type": "rgb", "normalize": False},
         )
+        global_rgb = ObsTerm(
+            func=base_mdp.image,
+            params={"sensor_cfg": SceneEntityCfg("global_cam"), "data_type": "rgb", "normalize": False},
+        )
 
         def __post_init__(self):
             self.enable_corruption = False
@@ -110,7 +129,10 @@ class CubePickPlaceRedTargetFrankaIKRelVisuomotorEnvCfg(FrankaCubeLiftEnvCfg):
         self.target_area_center_xy = _target_xy_from_env()
         self.cube_reset_target_xy = _cube_reset_target_xy_from_env(self.target_area_center_xy)
         self.target_area_size_xy = (0.12, 0.12)
+        self.cube_size_m = _parse_float_env("CUBE_SIZE_M", 0.04)
+        self.object_center_z = self.cube_size_m * 0.5 + 0.0005
         self.observations.policy.target_area_position.params["target_xy"] = self.target_area_center_xy
+        self.observations.policy.target_area_position.params["target_cube_center_z"] = self.object_center_z
         # Sample the cube in front of the red target for dataset collection. The radius range is wide
         # enough to force visual localization while staying inside the scripted expert's reliable reach.
         self.events.reset_object_position = EventTerm(
@@ -120,8 +142,8 @@ class CubePickPlaceRedTargetFrankaIKRelVisuomotorEnvCfg(FrankaCubeLiftEnvCfg):
                 "target_xy": self.cube_reset_target_xy,
                 "radius_range": _cube_radius_range_from_env(),
                 "angle_range": _cube_angle_range_from_env(),
-                "object_center_z": 0.0205,
-                "yaw_range": (0.0, 0.0),
+                "object_center_z": self.object_center_z,
+                "yaw_range": _cube_yaw_range_from_env(),
                 "robot_cfg": SceneEntityCfg("robot"),
                 "object_cfg": SceneEntityCfg("object"),
             },
@@ -146,7 +168,7 @@ class CubePickPlaceRedTargetFrankaIKRelVisuomotorEnvCfg(FrankaCubeLiftEnvCfg):
         self.scene.robot.init_state.pos = (0.0, 0.30, 0.0)
         self.scene.robot.init_state.rot = (1.0, 0.0, 0.0, 0.0)
         # Higher ready pose than the Franka asset default, giving the actor wrist camera a wider reset view.
-        self.scene.robot.init_state.joint_pos = {
+        actor_ready_joint_pos = {
             "panda_joint1": 0.0,
             "panda_joint2": -0.73,
             "panda_joint3": 0.0,
@@ -156,30 +178,22 @@ class CubePickPlaceRedTargetFrankaIKRelVisuomotorEnvCfg(FrankaCubeLiftEnvCfg):
             "panda_joint7": 0.8,
             "panda_finger_joint.*": 0.04,
         }
+        self.scene.robot.init_state.joint_pos = actor_ready_joint_pos
 
-        # A second Franka is kept static for now. Its wrist camera provides a global/observer view and
-        # leaves the scene layout ready for future bimanual control without changing dataset semantics.
+        # A second Franka is kept static for now. It mirrors the actor ready pose so its wrist camera is
+        # a true second-arm wrist view rather than a disguised global camera.
         self.scene.observer_robot = FRANKA_PANDA_HIGH_PD_CFG.replace(prim_path="{ENV_REGEX_NS}/ObserverRobot")
-        self.scene.observer_robot.init_state.pos = (0.0, -0.50, 0.0)
+        self.scene.observer_robot.init_state.pos = (0.0, -0.30, 0.0)
         self.scene.observer_robot.init_state.rot = (1.0, 0.0, 0.0, 0.0)
-        self.scene.observer_robot.init_state.joint_pos = {
-            "panda_joint1": 0.0,
-            "panda_joint2": -0.569,
-            "panda_joint3": 0.0,
-            "panda_joint4": -2.810,
-            "panda_joint5": 0.0,
-            "panda_joint6": 3.037,
-            "panda_joint7": 0.741,
-            "panda_finger_joint.*": 0.04,
-        }
+        self.scene.observer_robot.init_state.joint_pos = dict(actor_ready_joint_pos)
         self.scene.observer_robot.spawn.semantic_tags = [("class", "observer_robot")]
 
         # Replace the textured DexCube with a plain blue cube for cleaner vision training data.
         self.scene.object = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Object",
-            init_state=RigidObjectCfg.InitialStateCfg(pos=(0.50, 0.00, 0.0205), rot=(1.0, 0.0, 0.0, 0.0)),
+            init_state=RigidObjectCfg.InitialStateCfg(pos=(0.50, 0.00, self.object_center_z), rot=(1.0, 0.0, 0.0, 0.0)),
             spawn=sim_utils.CuboidCfg(
-                size=(0.04, 0.04, 0.04),
+                size=(self.cube_size_m, self.cube_size_m, self.cube_size_m),
                 rigid_props=RigidBodyPropertiesCfg(
                     solver_position_iteration_count=16,
                     solver_velocity_iteration_count=1,
@@ -242,7 +256,7 @@ class CubePickPlaceRedTargetFrankaIKRelVisuomotorEnvCfg(FrankaCubeLiftEnvCfg):
             ),
         )
 
-        # The observer wrist camera is mounted on the static second arm and acts as the global view.
+        # Matching eye-in-hand camera mounted on the static second arm.
         self.scene.observer_wrist_cam = CameraCfg(
             prim_path="{ENV_REGEX_NS}/ObserverRobot/panda_hand/observer_wrist_cam",
             update_period=0.0,
@@ -250,30 +264,46 @@ class CubePickPlaceRedTargetFrankaIKRelVisuomotorEnvCfg(FrankaCubeLiftEnvCfg):
             width=256,
             data_types=["rgb"],
             spawn=sim_utils.PinholeCameraCfg(
-                focal_length=16.0,
+                focal_length=18.0,
                 focus_distance=400.0,
                 horizontal_aperture=20.955,
-                clipping_range=(0.03, 3.0),
+                clipping_range=(0.03, 2.0),
             ),
             offset=CameraCfg.OffsetCfg(
-                # viewpoint
-                # pos=(0.9, 0.3, -0.6),
-                # rot=(0.82105, 0.37730, -0.400974, 0.15081),
-                # train
-                pos=(0.9, -0.2, -0.6),
-                rot=(0.85570, 0.28544, -0.41505, 0.11824),
+                pos=(0.08, 0.0, 0.0375),
+                rot=(0.66014, -0.25340, -0.25340, 0.66014),
                 convention="ros",
             ),
         )
 
-        self.image_obs_list = ["wrist_cam", "observer_wrist_cam"]
+        # Fixed overhead global camera, roughly where a robot head camera would look down at the table.
+        self.scene.global_cam = CameraCfg(
+            prim_path="{ENV_REGEX_NS}/GlobalCamera",
+            update_period=0.0,
+            height=256,
+            width=256,
+            data_types=["rgb"],
+            spawn=sim_utils.PinholeCameraCfg(
+                focal_length=14.0,
+                focus_distance=400.0,
+                horizontal_aperture=20.955,
+                clipping_range=(0.05, 3.0),
+            ),
+            offset=CameraCfg.OffsetCfg(
+                pos=(0.20, 0.00, 1.00),
+                rot=(0.69527, 0.12886, -0.12886, -0.69527),
+                convention="opengl",
+            ),
+        )
+
+        self.image_obs_list = ["wrist_cam", "observer_wrist_cam", "global_cam"]
         # Target coordinates are expressed in the actor robot root frame. The red patch is at world
         # (0.50, 0.30), while the actor robot root is at world y=0.30, so the local y target is 0.00.
 
         placement_params = {
             "target_xy": self.target_area_center_xy,
             "target_size_xy": self.target_area_size_xy,
-            "target_cube_center_z": 0.0205,
+            "target_cube_center_z": self.object_center_z,
             "height_tolerance": 0.03,
             "require_release": True,
             "gripper_open_command": 0.04,
@@ -289,9 +319,9 @@ class CubePickPlaceRedTargetFrankaIKRelVisuomotorEnvCfg(FrankaCubeLiftEnvCfg):
             func=pick_place_mdp.object_target_xy_tracking,
             params={
                 "std": 0.20,
-                "lifted_height": 0.04,
+                "lifted_height": self.cube_size_m,
                 "target_xy": self.target_area_center_xy,
-                "target_cube_center_z": 0.0205,
+                "target_cube_center_z": self.object_center_z,
             },
             weight=10.0,
         )
@@ -299,9 +329,9 @@ class CubePickPlaceRedTargetFrankaIKRelVisuomotorEnvCfg(FrankaCubeLiftEnvCfg):
             func=pick_place_mdp.object_target_xy_tracking,
             params={
                 "std": 0.04,
-                "lifted_height": 0.04,
+                "lifted_height": self.cube_size_m,
                 "target_xy": self.target_area_center_xy,
-                "target_cube_center_z": 0.0205,
+                "target_cube_center_z": self.object_center_z,
             },
             weight=6.0,
         )

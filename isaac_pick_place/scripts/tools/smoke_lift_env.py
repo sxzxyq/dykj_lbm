@@ -7,7 +7,7 @@ import sys
 
 from isaaclab.app import AppLauncher
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -36,7 +36,7 @@ parser.add_argument(
 parser.add_argument(
     "--camera-names",
     type=str,
-    default="wrist_cam,observer_wrist_cam",
+    default="wrist_cam,observer_wrist_cam,global_cam",
     help="Comma-separated scene camera sensor names to debug.",
 )
 parser.add_argument(
@@ -346,13 +346,13 @@ def main():
 
     step = 0
     try:
-        while simulation_app.is_running() and (args_cli.steps <= 0 or step < args_cli.steps):
+        while simulation_app.is_running() and (args_cli.steps < 0 or step < args_cli.steps):
             if args_cli.action_mode == "random":
                 actions = 2 * torch.rand(action_shape, device=env.unwrapped.device) - 1
             step_out = env.step(actions)
             obs, reward, terminated, truncated, info = step_out
             should_log = step == 0 or (args_cli.steps > 0 and step == args_cli.steps - 1)
-            should_log = should_log or (args_cli.steps <= 0 and (step + 1) % 1000 == 0)
+            should_log = should_log or (args_cli.steps < 0 and (step + 1) % 1000 == 0)
             if should_log:
                 reward_cpu = reward.detach().cpu().tolist() if hasattr(reward, "detach") else reward
                 _log(

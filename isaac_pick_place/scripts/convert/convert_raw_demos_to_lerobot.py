@@ -26,10 +26,11 @@ DEFAULT_OUTPUT_DIR = (
 DEFAULT_REPO_ID = "local/seven_dof_pick_place_lbm_target_aligned_v0_2eps"
 DEFAULT_TASK = "Pick up the cube and place it on the red target area."
 
-RAW_TO_LEROBOT_IMAGE_KEYS = {
-    "wrist_rgb": "observation.images.wrist_rgb",
-    "observer_wrist_rgb": "observation.images.observer_wrist_rgb",
-}
+ORDERED_IMAGE_KEY_MAP = (
+    ("wrist_rgb", "observation.images.wrist_rgb"),
+    ("observer_wrist_rgb", "observation.images.observer_wrist_rgb"),
+    ("global_rgb", "observation.images.global_rgb"),
+)
 
 STATE_COMPONENTS = (
     ("joint_pos", 9),
@@ -97,6 +98,12 @@ def _parse_args() -> argparse.Namespace:
         default=False,
         help="Skip the final LeRobotDataset reload smoke test.",
     )
+    parser.add_argument(
+        "--skip-image-stats-repair",
+        action="store_true",
+        default=False,
+        help="Skip post-conversion repair of LeRobot video image mean/std stats.",
+    )
     return parser.parse_args()
 
 
@@ -140,8 +147,8 @@ def _state_names() -> list[str]:
     return names
 
 
-def _features(image_shape: tuple[int, int, int]) -> dict:
-    return {
+def _features(image_shapes: dict[str, tuple[int, int, int]]) -> dict:
+    features = {
         "observation.state": {
             "dtype": "float32",
             "shape": (len(_state_names()),),
@@ -160,17 +167,16 @@ def _features(image_shape: tuple[int, int, int]) -> dict:
                 "gripper",
             ],
         },
-        "observation.images.wrist_rgb": {
-            "dtype": "video",
-            "shape": image_shape,
-            "names": ["height", "width", "channels"],
-        },
-        "observation.images.observer_wrist_rgb": {
-            "dtype": "video",
-            "shape": image_shape,
-            "names": ["height", "width", "channels"],
-        },
     }
+    for _, lerobot_key in ORDERED_IMAGE_KEY_MAP:
+        if lerobot_key not in image_shapes:
+            continue
+        features[lerobot_key] = {
+            "dtype": "video",
+            "shape": image_shapes[lerobot_key],
+            "names": ["height", "width", "channels"],
+        }
+    return features
 
 
 def _load_rgb(path: Path) -> np.ndarray:
@@ -194,16 +200,21 @@ def _state_from_step(step: dict, episode_dir: Path, line_number: int) -> np.ndar
     return np.concatenate(chunks).astype(np.float32)
 
 
-def _image_shape_from_first_episode(episode_dir: Path) -> tuple[int, int, int]:
+def _image_shapes_from_first_episode(episode_dir: Path) -> dict[str, tuple[int, int, int]]:
     for _, step in _iter_steps(episode_dir):
         images = step.get("images", {})
-        raw_rel = images.get("wrist_rgb")
-        if raw_rel is None:
+        image_shapes: dict[str, tuple[int, int, int]] = {}
+        for raw_key, lerobot_key in ORDERED_IMAGE_KEY_MAP:
+            raw_rel = images.get(raw_key)
+            if raw_rel is None:
+                continue
+            image = _load_rgb(episode_dir / raw_rel)
+            if image.ndim != 3 or image.shape[2] != 3:
+                raise ValueError(f"Expected HWC RGB image for {raw_key}, got shape {image.shape}")
+            image_shapes[lerobot_key] = tuple(int(dim) for dim in image.shape)
+        if "observation.images.wrist_rgb" not in image_shapes:
             raise KeyError(f"{episode_dir}/steps.jsonl first step missing images.wrist_rgb")
-        image = _load_rgb(episode_dir / raw_rel)
-        if image.ndim != 3 or image.shape[2] != 3:
-            raise ValueError(f"Expected HWC RGB image, got shape {image.shape}")
-        return tuple(int(dim) for dim in image.shape)
+        return image_shapes
     raise ValueError(f"{episode_dir}/steps.jsonl is empty")
 
 
@@ -245,7 +256,13 @@ def _select_episodes(args: argparse.Namespace) -> tuple[list[Path], list[dict]]:
     return selected_episodes, summaries
 
 
-def _frame_from_step(episode_dir: Path, line_number: int, step: dict, task: str) -> dict:
+def _frame_from_step(
+    episode_dir: Path,
+    line_number: int,
+    step: dict,
+    task: str,
+    image_keys: tuple[tuple[str, str], ...],
+) -> dict:
     action = np.asarray(step.get("action"), dtype=np.float32)
     if action.shape != (7,):
         raise ValueError(f"{episode_dir}/steps.jsonl:{line_number} action has shape {action.shape}, expected (7,)")
@@ -256,7 +273,7 @@ def _frame_from_step(episode_dir: Path, line_number: int, step: dict, task: str)
         "task": task,
     }
     images = step.get("images", {})
-    for raw_key, lerobot_key in RAW_TO_LEROBOT_IMAGE_KEYS.items():
+    for raw_key, lerobot_key in image_keys:
         rel_path = images.get(raw_key)
         if rel_path is None:
             raise KeyError(f"{episode_dir}/steps.jsonl:{line_number} missing images.{raw_key}")
@@ -278,7 +295,10 @@ def _prepare_output_dir(output_dir: Path, overwrite: bool) -> None:
 def _convert(args: argparse.Namespace) -> dict:
     LeRobotDataset = _import_lerobot()
     episodes, summaries = _select_episodes(args)
-    image_shape = _image_shape_from_first_episode(episodes[0])
+    image_shapes = _image_shapes_from_first_episode(episodes[0])
+    image_keys = tuple(
+        (raw_key, lerobot_key) for raw_key, lerobot_key in ORDERED_IMAGE_KEY_MAP if lerobot_key in image_shapes
+    )
 
     _prepare_output_dir(args.output_dir, args.overwrite)
     dataset = LeRobotDataset.create(
@@ -286,7 +306,7 @@ def _convert(args: argparse.Namespace) -> dict:
         root=args.output_dir,
         fps=args.fps,
         robot_type=args.robot_type,
-        features=_features(image_shape),
+        features=_features(image_shapes),
         use_videos=True,
         image_writer_threads=args.image_writer_threads,
         vcodec=args.vcodec,
@@ -297,7 +317,7 @@ def _convert(args: argparse.Namespace) -> dict:
         for episode_index, episode_dir in enumerate(episodes):
             frame_count = 0
             for line_number, step in _iter_steps(episode_dir):
-                dataset.add_frame(_frame_from_step(episode_dir, line_number, step, args.task))
+                dataset.add_frame(_frame_from_step(episode_dir, line_number, step, args.task, image_keys))
                 frame_count += 1
             dataset.save_episode(parallel_encoding=True)
             converted.append(
@@ -312,14 +332,23 @@ def _convert(args: argparse.Namespace) -> dict:
     finally:
         dataset.finalize()
 
+    image_stats_repair = None
+    if not args.skip_image_stats_repair:
+        from repair_lerobot_image_stats import repair_image_stats
+
+        image_stats_repair = repair_image_stats(args.output_dir)
+
     conversion_summary = {
         "raw_dir": str(args.raw_dir),
         "output_dir": str(args.output_dir),
         "repo_id": args.repo_id,
         "fps": args.fps,
         "task": args.task,
-        "image_shape": list(image_shape),
+        "image_shape": list(next(iter(image_shapes.values()))),
+        "image_shapes": {key: list(shape) for key, shape in image_shapes.items()},
+        "image_features": [lerobot_key for _, lerobot_key in image_keys],
         "state_names": _state_names(),
+        "image_stats_repair": image_stats_repair,
         "episodes": converted,
         "total_frames": int(sum(item["frames"] for item in converted)),
     }
@@ -339,8 +368,7 @@ def _load_check(args: argparse.Namespace, summary: dict) -> None:
     required_keys = {
         "observation.state",
         "action",
-        "observation.images.wrist_rgb",
-        "observation.images.observer_wrist_rgb",
+        *summary["image_features"],
     }
     missing = required_keys.difference(sample)
     if missing:

@@ -1,28 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Train the HF/LeRobot MultiTask DiT policy on the 256px random-cube dataset.
+# Train the HF/LeRobot MultiTask DiT policy on the dual-arm handoff relpose dataset.
 #
 # Example:
-#   bash isaac_pick_place/scripts/train_random_cube_256_mtdp.sh
+#   bash isaac_pick_place/scripts/train_handoff_relpose_256_mtdp.sh
 #
 # Common overrides:
-#   STEPS=10000 BATCH_SIZE=8 GRAD_ACCUM_STEPS=8 bash isaac_pick_place/scripts/train_random_cube_256_mtdp.sh
-#   OUTPUT_DIR=/path/to/output bash isaac_pick_place/scripts/train_random_cube_256_mtdp.sh
-#   CHECKPOINT_PATH=/path/to/final_model bash isaac_pick_place/scripts/train_random_cube_256_mtdp.sh
-#   TENSORBOARD=1 bash isaac_pick_place/scripts/train_random_cube_256_mtdp.sh
-#
-# Notes:
-# - STATE_MODE=joint_ee keeps joint_pos(9) + ee_position(3) + ee_quat(4).
-# - STATE_MODE=ee_only keeps only ee_position(3) + ee_quat(4).
-# - Both wrist_rgb and observer_wrist_rgb are used as visual inputs.
-# - Dataset images are 256x256; the policy resizes/crops to IMAGE_SIZE, default 224.
+#   STEPS=10000 BATCH_SIZE=8 GRAD_ACCUM_STEPS=8 bash isaac_pick_place/scripts/train_handoff_relpose_256_mtdp.sh
+#   RUN_NAME=my_handoff_relpose_run bash isaac_pick_place/scripts/train_handoff_relpose_256_mtdp.sh
+#   CHECKPOINT_PATH=/path/to/final_model bash isaac_pick_place/scripts/train_handoff_relpose_256_mtdp.sh
+#   TENSORBOARD=0 bash isaac_pick_place/scripts/train_handoff_relpose_256_mtdp.sh
 
 PROJECT_ROOT="${PROJECT_ROOT:-/home/ubuntu/Workspace/seven_dof_pick_place_lbm}"
 PYTHON_BIN="${PYTHON_BIN:-/home/ubuntu/Workspace/multitask_dit_policy/.venv/bin/python}"
 
-DATASET_DIR="${DATASET_DIR:-${PROJECT_ROOT}/experiments/lerobot_datasets/lerobot_random_cube_256_v0_100success}"
-RUN_NAME="${RUN_NAME:-hf_mtdp_random_cube_256_v0_100success_$(date +%Y%m%d_%H%M%S)}"
+DATASET_DIR="${DATASET_DIR:-${PROJECT_ROOT}/experiments/lerobot_datasets/lerobot_handoff_handoff_100_joint_ee_3cam_v1_relpose}"
+RUN_NAME="${RUN_NAME:-hf_mtdp_handoff_3cam_joint_ee_relpose_100success_bs16acc4_30k}"
 OUTPUT_DIR="${OUTPUT_DIR:-${PROJECT_ROOT}/experiments/training_runs/${RUN_NAME}}"
 CHECKPOINT_PATH="${CHECKPOINT_PATH:-}"
 
@@ -43,10 +37,11 @@ NUM_LAYERS="${NUM_LAYERS:-6}"
 NUM_HEADS="${NUM_HEADS:-8}"
 NUM_TRAIN_TIMESTEPS="${NUM_TRAIN_TIMESTEPS:-100}"
 IMAGE_SIZE="${IMAGE_SIZE:-224}"
+IMAGE_KEYS="${IMAGE_KEYS:-auto}"
 VIDEO_BACKEND="${VIDEO_BACKEND:-torchcodec}"
 LOG_EVERY="${LOG_EVERY:-1}"
-STATE_MODE="${STATE_MODE:-joint_ee}"
-TENSORBOARD="${TENSORBOARD:-0}"
+STATE_MODE="${STATE_MODE:-handoff_joint_ee_relpose}"
+TENSORBOARD="${TENSORBOARD:-1}"
 TENSORBOARD_LOG_DIR="${TENSORBOARD_LOG_DIR:-${OUTPUT_DIR}/tensorboard}"
 TENSORBOARD_FLUSH_EVERY="${TENSORBOARD_FLUSH_EVERY:-10}"
 TENSORBOARD_FLUSH_SECS="${TENSORBOARD_FLUSH_SECS:-5}"
@@ -64,7 +59,7 @@ echo "[CONFIG] save_freq=${SAVE_FREQ}"
 echo "[CONFIG] device=${DEVICE} seed=${SEED}"
 echo "[CONFIG] horizon=${HORIZON} n_obs_steps=${N_OBS_STEPS} n_action_steps=${N_ACTION_STEPS}"
 echo "[CONFIG] hidden_dim=${HIDDEN_DIM} layers=${NUM_LAYERS} heads=${NUM_HEADS} diffusion_steps=${NUM_TRAIN_TIMESTEPS}"
-echo "[CONFIG] image_size=${IMAGE_SIZE} video_backend=${VIDEO_BACKEND}"
+echo "[CONFIG] image_size=${IMAGE_SIZE} image_keys=${IMAGE_KEYS} video_backend=${VIDEO_BACKEND}"
 echo "[CONFIG] state_mode=${STATE_MODE}"
 echo "[CONFIG] log_every=${LOG_EVERY} tensorboard=${TENSORBOARD} tensorboard_log_dir=${TENSORBOARD_LOG_DIR}"
 echo "[CONFIG] tensorboard_flush_every=${TENSORBOARD_FLUSH_EVERY} tensorboard_flush_secs=${TENSORBOARD_FLUSH_SECS}"
@@ -73,7 +68,7 @@ echo
 cd "${PROJECT_ROOT}"
 
 TRAIN_ARGS=(
-  "${PROJECT_ROOT}/isaac_pick_place/scripts/train_hf_mtdp_smoke.py"
+  "${PROJECT_ROOT}/isaac_pick_place/scripts/train/train_hf_mtdp_smoke.py"
   --dataset-dir "${DATASET_DIR}" \
   --output-dir "${OUTPUT_DIR}" \
   --save-freq "${SAVE_FREQ}" \
@@ -92,6 +87,7 @@ TRAIN_ARGS=(
   --num-train-timesteps "${NUM_TRAIN_TIMESTEPS}" \
   --lr "${LR}" \
   --image-size "${IMAGE_SIZE}" \
+  --image-keys "${IMAGE_KEYS}" \
   --log-every "${LOG_EVERY}" \
   --state-mode "${STATE_MODE}" \
   --video-backend "${VIDEO_BACKEND}"

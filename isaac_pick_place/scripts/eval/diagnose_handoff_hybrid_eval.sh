@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run closed-loop visual evaluation for a trained MultiTask DiT checkpoint.
+# Run 2x2 expert/policy hybrid diagnostics for the dual-arm handoff task.
 #
 # Example:
-#   CHECKPOINT=/path/to/checkpoint_30000 bash isaac_pick_place/scripts/eval_pick_place_policy.sh
+#   CHECKPOINT=/path/to/checkpoint_23000 \
+#     bash isaac_pick_place/scripts/diagnose_handoff_hybrid_eval.sh
 #
 # Common overrides:
-#   EPISODES=10 MAX_STEPS=900 N_ACTION_STEPS=8 bash isaac_pick_place/scripts/eval_pick_place_policy.sh
-#   OUTPUT_DIR=/path/to/eval_out RECORD_IMAGE_EVERY=1 SAVE_VIDEO=1 bash isaac_pick_place/scripts/eval_pick_place_policy.sh
-#   HEADLESS=0 SAVE_VIDEO=0 bash isaac_pick_place/scripts/eval_pick_place_policy.sh
-#   FIXED_CUBE_XY=0.50,-0.10 bash isaac_pick_place/scripts/eval_pick_place_policy.sh
-#   FIXED_CUBE_XY_LIST='0.36,-0.15;0.40,-0.11' bash isaac_pick_place/scripts/eval_pick_place_policy.sh
+#   COMBOS=expert_expert EPISODES=1 HEADLESS=1 bash isaac_pick_place/scripts/diagnose_handoff_hybrid_eval.sh
+#   RECORD_IMAGE_EVERY=5 RUN_NAME=hybrid_debug bash isaac_pick_place/scripts/diagnose_handoff_hybrid_eval.sh
 
 PROJECT_ROOT="${PROJECT_ROOT:-/home/ubuntu/Workspace/seven_dof_pick_place_lbm}"
 ISAACLAB_DIR="${ISAACLAB_DIR:-/home/ubuntu/Workspace/IsaacLab}"
@@ -23,35 +21,45 @@ LEROBOT_PY311_SHIM="${LEROBOT_PY311_SHIM:-/tmp/lerobot_py311}"
 CHECKPOINT="${CHECKPOINT:-}"
 if [[ -z "${CHECKPOINT}" ]]; then
   echo "[ERROR] CHECKPOINT is required, for example:"
-  echo "  CHECKPOINT=${PROJECT_ROOT}/experiments/training_runs/hf_mtdp_random_cube_256_v0_100success_bs32acc2_30k/checkpoint_30000 \\"
-  echo "    bash ${PROJECT_ROOT}/isaac_pick_place/scripts/eval_pick_place_policy.sh"
+  echo "  CHECKPOINT=${PROJECT_ROOT}/experiments/training_runs/.../checkpoint_23000 \\"
+  echo "    bash ${PROJECT_ROOT}/isaac_pick_place/scripts/diagnose_handoff_hybrid_eval.sh"
   exit 2
 fi
 
-RUN_NAME="${RUN_NAME:-eval_policy_$(date +%Y%m%d_%H%M%S)}"
+RUN_NAME="${RUN_NAME:-diagnose_handoff_hybrid_$(date +%Y%m%d_%H%M%S)}"
 OUTPUT_DIR="${OUTPUT_DIR:-${PROJECT_ROOT}/experiments/eval_videos/${RUN_NAME}}"
-TASK="${TASK:-Isaac-Cube-Pick-Place-Red-Target-Franka-IK-Rel-Visuomotor-v0}"
-EPISODES="${EPISODES:-5}"
-MAX_STEPS="${MAX_STEPS:-900}"
+TASK="${TASK:-Isaac-Cube-Handoff-Yellow-Red-Dual-Franka-IK-Rel-Visuomotor-v0}"
+TASK_TEXT="${TASK_TEXT:-Right arm moves the blue cube to the yellow handoff area, then left arm moves it to the red target area.}"
+COMBOS="${COMBOS:-expert_expert,expert_policy,policy_expert,policy_policy}"
+EPISODES="${EPISODES:-3}"
+MAX_STEPS="${MAX_STEPS:-2600}"
 SEED="${SEED:-2000}"
 DEVICE="${DEVICE:-cuda:0}"
 N_ACTION_STEPS="${N_ACTION_STEPS:-}"
 NUM_INFERENCE_STEPS="${NUM_INFERENCE_STEPS:-}"
-RECORD_IMAGE_EVERY="${RECORD_IMAGE_EVERY:-5}"
-SAVE_VIDEO="${SAVE_VIDEO:-0}"
-VIDEO_FPS="${VIDEO_FPS:-20}"
+POLICY_INFERENCE_SEED="${POLICY_INFERENCE_SEED:-123}"
+POLICY_INFERENCE_SEED_MODE="${POLICY_INFERENCE_SEED_MODE:-each_chunk}"
+HANDOFF_TIME_TOTAL_STEPS="${HANDOFF_TIME_TOTAL_STEPS:-1845}"
+STABLE_STEPS="${STABLE_STEPS:-20}"
+REST_STEPS="${REST_STEPS:-20}"
+CLOSE_STEPS="${CLOSE_STEPS:-35}"
+OPEN_STEPS="${OPEN_STEPS:-35}"
+PHASE_TIMEOUT="${PHASE_TIMEOUT:-320}"
 LOG_EVERY="${LOG_EVERY:-25}"
+RECORD_IMAGE_EVERY="${RECORD_IMAGE_EVERY:-0}"
 WARMUP_STEPS="${WARMUP_STEPS:-2}"
 HEADLESS="${HEADLESS:-1}"
-FIXED_CUBE_XY="${FIXED_CUBE_XY:-}"
-FIXED_CUBE_XY_LIST="${FIXED_CUBE_XY_LIST:-}"
 
 echo "[CONFIG] project=${PROJECT_ROOT}"
 echo "[CONFIG] checkpoint=${CHECKPOINT}"
 echo "[CONFIG] output=${OUTPUT_DIR}"
 echo "[CONFIG] task=${TASK}"
+echo "[CONFIG] combos=${COMBOS}"
 echo "[CONFIG] episodes=${EPISODES} max_steps=${MAX_STEPS} seed=${SEED}"
 echo "[CONFIG] device=${DEVICE} n_action_steps=${N_ACTION_STEPS:-<checkpoint>} num_inference_steps=${NUM_INFERENCE_STEPS:-<checkpoint>}"
+echo "[CONFIG] policy_inference_seed=${POLICY_INFERENCE_SEED} policy_inference_seed_mode=${POLICY_INFERENCE_SEED_MODE}"
+echo "[CONFIG] stable_steps=${STABLE_STEPS} phase_timeout=${PHASE_TIMEOUT}"
+echo "[CONFIG] record_image_every=${RECORD_IMAGE_EVERY} headless=${HEADLESS}"
 echo
 
 mkdir -p "${LEROBOT_PY311_SHIM}"
@@ -72,17 +80,26 @@ fi
 cd "${ISAACLAB_DIR}"
 
 ARGS=(
-  "${PROJECT_ROOT}/isaac_pick_place/scripts/eval_pick_place_policy.py"
+  "${PROJECT_ROOT}/isaac_pick_place/scripts/eval/diagnose_handoff_hybrid_eval.py"
   --checkpoint "${CHECKPOINT}"
   --task "${TASK}"
+  --task-text "${TASK_TEXT}"
   --output-dir "${OUTPUT_DIR}"
+  --combos "${COMBOS}"
   --episodes "${EPISODES}"
   --max-steps "${MAX_STEPS}"
   --seed "${SEED}"
   --enable_cameras
   --device "${DEVICE}"
+  --policy-inference-seed "${POLICY_INFERENCE_SEED}"
+  --policy-inference-seed-mode "${POLICY_INFERENCE_SEED_MODE}"
+  --handoff-time-total-steps "${HANDOFF_TIME_TOTAL_STEPS}"
+  --stable-steps "${STABLE_STEPS}"
+  --rest-steps "${REST_STEPS}"
+  --close-steps "${CLOSE_STEPS}"
+  --open-steps "${OPEN_STEPS}"
+  --phase-timeout "${PHASE_TIMEOUT}"
   --record-image-every "${RECORD_IMAGE_EVERY}"
-  --video-fps "${VIDEO_FPS}"
   --warmup-steps "${WARMUP_STEPS}"
   --log-every "${LOG_EVERY}"
   --refresh-camera-xform
@@ -97,17 +114,8 @@ fi
 if [[ -n "${NUM_INFERENCE_STEPS}" ]]; then
   ARGS+=(--num-inference-steps "${NUM_INFERENCE_STEPS}")
 fi
-if [[ -n "${FIXED_CUBE_XY}" ]]; then
-  ARGS+=(--fixed-cube-xy "${FIXED_CUBE_XY}")
-fi
-if [[ -n "${FIXED_CUBE_XY_LIST}" ]]; then
-  ARGS+=(--fixed-cube-xy-list "${FIXED_CUBE_XY_LIST}")
-fi
-if [[ "${SAVE_VIDEO}" == "1" ]]; then
-  ARGS+=(--save-video)
-fi
 
 "${CONDA_BIN}" run --no-capture-output -n "${CONDA_ENV}" env TERM=xterm PYTHONUNBUFFERED=1 ./isaaclab.sh -p "${ARGS[@]}"
 
 echo
-echo "[DONE] eval output: ${OUTPUT_DIR}"
+echo "[DONE] hybrid diagnostic output: ${OUTPUT_DIR}"
